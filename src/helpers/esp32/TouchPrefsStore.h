@@ -615,6 +615,8 @@ bool    touchPrefsGetLockPreviews();           // message text on the lock scree
 void    touchPrefsSetLockPreviews(bool on);
 bool    touchPrefsGetGlanceWhenLocked();       // "at a glance" also fires while manually/idle locked, not just unlocked+dimmed (default false)
 void    touchPrefsSetGlanceWhenLocked(bool on);
+bool    touchPrefsGetVibrate();               // Pager: vibrate for messages that would chime (default true)
+void    touchPrefsSetVibrate(bool on);
 bool    touchPrefsGetGlanceEnabled();          // master "at a glance" feature toggle (default true)
 void    touchPrefsSetGlanceEnabled(bool on);
 

@@ -2,9 +2,10 @@
 //
 // Board class for the LilyGo T-LoRa Pager (ESP32-S3). Unlike the T-Deck/
 // Heltec V4, power-rail control and battery reporting go through I2C chips —
-// an XL9555 GPIO expander gates LoRa/GPS/keyboard/SD power, and a BQ27220
+// an XL9555 GPIO expander gates LoRa/GPS/keyboard/SD power, a BQ27220
 // fuel gauge replaces the usual VBAT ADC divider (this board doesn't have
-// one). begin() brings up just enough of that I2C chain for the rest of the
+// one), and a BQ25896 charger owns USB input and the battery switch.
+// begin() brings up just enough of that I2C chain for the rest of the
 // app to run.
 #pragma once
 
@@ -40,7 +41,8 @@
 #define PAGER_EXPAND_SD_PULLEN 11
 #define PAGER_EXPAND_SD_EN     12
 
-#define PAGER_XL9555_ADDR 0x20
+#define PAGER_XL9555_ADDR  0x20
+#define PAGER_BQ25896_ADDR 0x6B   // charger / power path (power key = its QON input)
 
 // Shared-SPI chip selects/resets that are NOT otherwise claimed before first
 // bus traffic. The display's CS is TFT_eSPI's; the radio's NSS/RESET belong to
@@ -57,6 +59,9 @@
 class TLoraPagerBoard : public ESP32Board {
 public:
   enum class SdCardState : uint8_t { Absent, Present, Unknown };
+
+  // BQ25896 REG0B CHRG_STAT, plus Unknown when the charger does not answer.
+  enum class ChargeState : uint8_t { NotCharging = 0, PreCharge = 1, FastCharge = 2, Done = 3, Unknown = 0xFF };
 
   void begin();
   SdCardState sdCardState();
@@ -87,17 +92,21 @@ public:
     esp_deep_sleep_start(); // CPU halts here and never returns!
   }
 
+  // Battery voltage from the BQ27220. Shares one gauge refresh with the state of
+  // charge below (see refreshGauge()).
   uint16_t getBattMilliVolts() {
-    // gauge.refresh() reads the BQ27220's whole register block over 100 kHz I2C (about
-    // 6 ms on the UI loop), and the status bar alone asks 4 times a second. A pack moves
-    // slowly: one reading serves every caller for 2 s, short enough that plugging the
-    // charger in still shows at once (the UI publishes a charge flip immediately).
-    const uint32_t now = millis();
-    if (batt_ms_ && now - batt_ms_ < 2000) return batt_mv_;
-    batt_ms_ = now ? now : 1;
-    const uint16_t mv = gauge.refresh() ? gauge.getVoltage() : 0;
-    batt_mv_ = mv > 0 ? mv : PAGER_BATT_MILLIVOLTS_FALLBACK;
+    refreshGauge();
     return batt_mv_;
+  }
+
+  // The gauge's own StateOfCharge(), in percent; -1 when it has not answered with
+  // an in-range value yet. The gauge coulomb-counts against its learned pack
+  // profile, so this is the real charge level: terminal voltage is charger-driven
+  // and reads near full the moment USB goes in, whatever the pack holds (the
+  // T-Display P4, same gauge, had exactly that bug: #273).
+  int getBattStateOfCharge() {
+    refreshGauge();
+    return batt_soc_;
   }
 
   const char* getManufacturerName() const{
@@ -114,17 +123,37 @@ public:
   bool setGpsPower(bool on);
   bool gpsPowerIsOn() const { return gps_on_; }
 
-  // TODO: BQ25896 charger (XPowersLib) bring-up is out of scope for now — the
-  // BQ27220 gauge alone covers battery %/mV for the UI. Add charge-status/
-  // current reporting once the charger is wired in.
+  // ---- BQ25896 charger -------------------------------------------------------
+  // External power (USB) present: 1 yes, 0 no, -1 charger not answering. Cached
+  // for a second; the status bar asks several times a second.
+  int  externalPowerPresent();
+  ChargeState chargeState();
+  bool chargerPresent() const { return charger_ready_; }
+
+  // Real power-off: opens the charger's battery switch (BQ25896 ship mode,
+  // BATFET_DIS), which takes the whole board down to the charger's own leakage,
+  // about 26 µA against about 530 µA in deep sleep. Only the power key (the
+  // charger's QON input) or plugging in USB switches it back on. Refused (false)
+  // while USB is connected: VBUS would keep the system powered anyway, and the
+  // caller then falls back to deep sleep. On success it does not return.
+  bool enterShipMode();
 
   ExtensionIOXL9555 io_expander;
   GaugeBQ27220 gauge;
 
 private:
+  void refreshGauge();
+  bool chargerRead(uint8_t reg, uint8_t& val);
+  bool chargerWrite(uint8_t reg, uint8_t val);
+
   bool expander_ready_ = false;
+  bool charger_ready_ = false;
   bool gps_on_ = true;     // GPS_EN as last driven (on from the boot rail bring-up)
-  uint16_t batt_mv_ = 0;   // the last gauge reading (getBattMilliVolts)
-  uint32_t batt_ms_ = 0;   // when it was taken, 0 = never
+  uint16_t batt_mv_ = PAGER_BATT_MILLIVOLTS_FALLBACK;   // the last gauge voltage
+  int      batt_soc_ = -1;  // the last in-range gauge state of charge, -1 = none yet
+  uint32_t batt_ms_ = 0;    // when the gauge was last read, 0 = never
+  int8_t   ext_pwr_ = -1;   // externalPowerPresent() cache
+  uint8_t  sys_stat_ = 0;   // REG0B as last read
+  uint32_t chg_ms_ = 0;     // when the charger was last read, 0 = never
   SemaphoreHandle_t expander_mutex_ = nullptr;
 };

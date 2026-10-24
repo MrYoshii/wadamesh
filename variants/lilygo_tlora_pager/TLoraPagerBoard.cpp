@@ -1,6 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <Arduino.h>
 #include "TLoraPagerBoard.h"
+#include <Preferences.h>
+#include "PagerHaptics.h"
+
+// The pack LilyGo fits (3.7 V / 1500 mAh). The BQ27220 leaves the factory set up
+// for 3000 mAh, and its state of charge is only as good as that figure.
+#define PAGER_GAUGE_DESIGN_MAH 1500
+
+// Programs the gauge's design/full-charge capacity once, the way LilyGoLib does
+// for this board. The gauge sits on the battery, so the setting outlives
+// reflashes and power-off; afterwards the design-capacity check alone skips this.
+// A failed attempt is recorded so a gauge that refuses (sealed with a custom key)
+// is not put through config-update mode again on every boot.
+static void pagerConfigureGauge(GaugeBQ27220& gauge) {
+  if (!gauge.refresh()) return;                 // not answering: try next boot
+  if (gauge.getDesignCapacity() == PAGER_GAUGE_DESIGN_MAH) return;
+  Preferences p;
+  if (!p.begin("pagerhw", false)) return;
+  const uint8_t failed = p.getUChar("gauge_fail", 0);
+  if (!failed) {
+    const bool ok = gauge.setNewCapacity(PAGER_GAUGE_DESIGN_MAH, PAGER_GAUGE_DESIGN_MAH);
+    Serial.printf("[BOOT] bq27220 capacity -> %u mAh %s\n", PAGER_GAUGE_DESIGN_MAH, ok ? "ok" : "FAILED");
+    if (!ok) p.putUChar("gauge_fail", 1);
+  }
+  p.end();
+}
 
 void TLoraPagerBoard::begin() {
 
@@ -98,7 +123,22 @@ void TLoraPagerBoard::begin() {
   Wire.beginTransmission(0x18);
   Serial.printf("[BOOT] es8311 %s\n", Wire.endTransmission() == 0 ? "ok" : "PROBE FAILED");
 
+  // DRV2605 vibration motor driver: its rail (DRV_EN) is up from the list above.
+  // Configured once here and left in standby until a pattern plays.
+  if (expander_ok) pagerHapticsBegin();
+
   gauge.begin(Wire);
+  pagerConfigureGauge(gauge);
+
+  // BQ25896 charger: presence only. Its charge settings stay at the chip's own
+  // defaults (they reset to them on every I2C watchdog expiry anyway); we read
+  // the input/charge status and use the battery switch for power-off.
+  {
+    uint8_t stat = 0;
+    charger_ready_ = chargerRead(0x0B, stat);
+    if (charger_ready_) sys_stat_ = stat;
+    Serial.printf("[BOOT] bq25896 %s\n", charger_ready_ ? "ok" : "PROBE FAILED");
+  }
 
   esp_reset_reason_t reason = esp_reset_reason();
   if (reason == ESP_RST_DEEPSLEEP) {
@@ -187,4 +227,76 @@ void TLoraPagerBoard::setAmpEnabled(bool on) {
   if (xSemaphoreTake(expander_mutex_, pdMS_TO_TICKS(50)) != pdTRUE) return;
   io_expander.digitalWrite(PAGER_EXPAND_AMP_EN, on ? HIGH : LOW);
   xSemaphoreGive(expander_mutex_);
+}
+
+// One gauge refresh (the BQ27220's whole register block, about 6 ms over 100 kHz
+// I2C) serves every battery caller for 2 s: the status bar alone asks 4 times a
+// second, and a pack moves slowly. Short enough that plugging the charger in
+// still shows at once (the UI publishes a charge flip immediately).
+void TLoraPagerBoard::refreshGauge() {
+  const uint32_t now = millis();
+  if (batt_ms_ && now - batt_ms_ < 2000) return;
+  batt_ms_ = now ? now : 1;
+  if (!gauge.refresh()) return;                  // keep the last good values
+  const uint16_t mv = gauge.getVoltage();
+  if (mv >= 2500 && mv <= 4600) batt_mv_ = mv;
+  const uint16_t soc = gauge.getStateOfCharge();
+  if (soc <= 100) batt_soc_ = (int)soc;
+}
+
+bool TLoraPagerBoard::chargerRead(uint8_t reg, uint8_t& val) {
+  Wire.beginTransmission(PAGER_BQ25896_ADDR);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((uint8_t)PAGER_BQ25896_ADDR, (uint8_t)1) != 1) return false;
+  val = (uint8_t)Wire.read();
+  return true;
+}
+
+bool TLoraPagerBoard::chargerWrite(uint8_t reg, uint8_t val) {
+  Wire.beginTransmission(PAGER_BQ25896_ADDR);
+  Wire.write(reg);
+  Wire.write(val);
+  return Wire.endTransmission() == 0;
+}
+
+// REG0B (system status): VBUS_STAT[7:5] (000 no input, 001 USB host, 010
+// adapter, 111 OTG), CHRG_STAT[4:3], PG_STAT[2] (input power good).
+int TLoraPagerBoard::externalPowerPresent() {
+  if (!charger_ready_) return -1;
+  const uint32_t now = millis();
+  if (!chg_ms_ || now - chg_ms_ >= 1000) {
+    chg_ms_ = now ? now : 1;
+    uint8_t stat = 0;
+    if (chargerRead(0x0B, stat)) {
+      sys_stat_ = stat;
+      const uint8_t vbus = (stat >> 5) & 0x07;
+      const bool pg = (stat & 0x04) != 0;
+      ext_pwr_ = (pg || (vbus != 0 && vbus != 7)) ? 1 : 0;   // OTG = we are the source
+    }
+  }
+  return ext_pwr_;
+}
+
+TLoraPagerBoard::ChargeState TLoraPagerBoard::chargeState() {
+  if (externalPowerPresent() < 0) return ChargeState::Unknown;
+  return (ChargeState)((sys_stat_ >> 3) & 0x03);
+}
+
+// REG09: BATFET_DIS is bit 5, BATFET_DLY bit 3 (0 = open at once). The switch
+// stays open until the power key (QON) is pressed or VBUS returns, so this
+// needs no wake source of our own.
+bool TLoraPagerBoard::enterShipMode() {
+  if (!charger_ready_) return false;
+  chg_ms_ = 0;                                   // read the input state fresh
+  if (externalPowerPresent() != 0) return false; // on USB (or unknown): would not switch off
+  uint8_t r9 = 0;
+  if (!chargerRead(0x09, r9)) return false;
+  r9 &= (uint8_t)~0x08;                          // no turn-off delay
+  r9 |= 0x20;                                    // BATFET_DIS
+  Serial.println("[POWER] ship mode");
+  Serial.flush();
+  if (!chargerWrite(0x09, r9)) return false;
+  delay(2000);                                   // power goes away here
+  return false;                                  // still running: the caller falls back
 }

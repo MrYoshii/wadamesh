@@ -196,6 +196,9 @@ static_assert(ChannelSenderSplit::kMaxWireName >= (size_t)UITask::MAX_SENDER_NAM
   #if defined(HAS_PAGER_KEYBOARD)
     #include "../helpers/input/PagerKeyboard.h"
   #endif
+  #if defined(TLORA_PAGER)
+    #include "PagerHaptics.h"          // DRV2605 vibration motor (variants/lilygo_tlora_pager)
+  #endif
   #if defined(HAS_PAGER_ENCODER)
     #include <helpers/input/PagerEncoder.h>
   #endif
@@ -13194,6 +13197,16 @@ static void toggleLoudAlertsCb(lv_event_t* e) {
 }
 #endif
 
+#if defined(TLORA_PAGER)
+// Vibration switch (the Pager's DRV2605 motor). Turning it on gives one buzz, so
+// the setting proves itself under your thumb.
+static void toggleVibrateCb(lv_event_t* e) {
+  if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
+  const bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+  touchPrefsSetVibrate(on);
+  if (on) pagerHapticsPlay(PagerHaptic::Message);
+}
+#endif
 static void toggleMessageSoundCb(lv_event_t* e) {
   if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
   const bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
@@ -17897,7 +17910,7 @@ static void openExpansionCardCb(lv_event_t* e) {
 }
 #endif  // HAS_EXPANSION_KIT
 
-#if defined(HAS_TDECK_GT911) || defined(HAS_TDECK_PRO) || defined(HAS_THINKNODE_M9)
+#if defined(HAS_TDECK_GT911) || defined(HAS_TDECK_PRO) || defined(HAS_THINKNODE_M9) || defined(TLORA_PAGER)
 // Lock-screen settings live in the Device modal but the picker implementation
 // needs the SD-mount state (declared further down), so split: the small bits
 // the modal body uses directly are here; the picker is defined below.
@@ -18510,6 +18523,14 @@ static void buildSoundPage() {
     lv_label_set_text_fmt(s_vol_val_lbl, "%d%%", (int)touchPrefsGetSoundVolume());
 #endif
   }
+#if defined(TLORA_PAGER)
+  if (pagerHapticsPresent()) {
+    lv_obj_t* c = setCard("Vibration");
+    setSwitchRow(c, "Vibrate", "Buzzes for the same messages as the sound below, even with Sound off. "
+                 "Do Not Disturb and muted channels stay still.",
+                 touchPrefsGetVibrate(), toggleVibrateCb);
+  }
+#endif
   {
     lv_obj_t* c = setCard("Play a sound for");
     setSwitchRow(c, "Messages", nullptr, touchPrefsGetSoundMessages(), toggleMessageSoundCb);
@@ -18737,7 +18758,7 @@ static void lockColorPickCb(lv_event_t* e) {
 }
 #endif
 static void buildLockPage() {
-#if defined(HAS_TDECK_GT911) || defined(HAS_TDECK_PRO) || defined(HAS_THINKNODE_M9)
+#if defined(HAS_TDECK_GT911) || defined(HAS_TDECK_PRO) || defined(HAS_THINKNODE_M9) || defined(TLORA_PAGER)
   {
     lv_obj_t* c = setCard("Look");
     char cur[TOUCH_LOCK_WALLPAPER_MAXLEN], disp[64];
@@ -18748,7 +18769,7 @@ static void buildLockPage() {
     // The way back from a picture of your own (#626).
     s_lockwall_default_row = strcmp(cur, touchPrefsDefaultLockWallpaper()) != 0
         ? setActionRow(c, LV_SYMBOL_REFRESH, "Default wallpaper", nullptr, lockwallDefaultCb) : nullptr;
-#if !defined(HAS_TDECK_PRO)
+#if !defined(HAS_TDECK_PRO) && !defined(TLORA_PAGER)   // the Pager keeps a white clock (lockscreenShow)
     setSwatchRow(c, "Text colour", kLockColors, (int)(sizeof(kLockColors) / sizeof(kLockColors[0])),
                  touchPrefsGetLockTextColor(), lockColorPickCb);
 #endif
@@ -24224,6 +24245,16 @@ static uint16_t batteryMvSampled() { return g_lv.task ? g_lv.task->getBattMilliV
 // The threshold against an uncalibrated ADC still wants on-device confirmation,
 // exactly as the V4-R8 note above already says.
 static bool batteryIsCharging(uint16_t mv) {
+#if defined(TLORA_PAGER)
+  // The Pager's BQ25896 charger knows whether USB power is in, and its gauge reads
+  // the CELL voltage, which never rises past the charger's target: the voltage test
+  // below could not report charging on this board at all. Fall back to it only
+  // while the charger is not answering.
+  if (mv != 0) {
+    const int ext = board.externalPowerPresent();
+    if (ext >= 0) return ext != 0;
+  }
+#endif
   const uint16_t full = batteryFullMv();
   return mv != 0 && mv >= (uint16_t)(full + 50);
 }
@@ -24243,7 +24274,16 @@ static uint16_t batteryMvSmoothed() {
   // Normally hold for 20 s to kill jitter — BUT publish at once when the charge
   // state flips, so plugging/unplugging the charger is recognized immediately
   // instead of waiting out the hold window.
+#if defined(TLORA_PAGER)
+  // The verdict above is the charger's, not a function of the reading, so comparing
+  // two readings never sees it change: watch the charger's own state instead.
+  static int s_ext_prev = -2;
+  const int ext_now = board.externalPowerPresent();
+  const bool charge_flip = (s_pub != 0) && s_ext_prev != -2 && ext_now != s_ext_prev;
+  s_ext_prev = ext_now;
+#else
   const bool charge_flip = (s_pub != 0) && (batteryIsCharging(cur) != batteryIsCharging(s_pub));
+#endif
   if (s_pub == 0 || charge_flip || (unsigned long)(now - s_pub_ms) >= 20000UL) {
     s_pub    = cur;
     s_pub_ms = now;
@@ -24275,7 +24315,7 @@ static const char* batteryGlyphForMv(uint16_t mv) {
 }
 
 static int batteryPercentFromMv(uint16_t mv) {
-#if defined(HAS_TDISPLAY_P4)
+#if defined(HAS_TDISPLAY_P4) || defined(TLORA_PAGER)
   // This board has a BQ27220 fuel gauge, which coulomb-counts against its learned
   // pack profile and therefore knows the actual state of charge. Ask it, and only
   // fall back to the voltage curve below if it does not answer. Terminal voltage is
@@ -49790,7 +49830,7 @@ static void openSoundPickerCb(lv_event_t* e) {
 #endif  // CAP_SOUND_FILES
 
 // ---- Lock-screen wallpaper picker (lists JPEGs in internal /lock/ + SD) ----
-#if defined(HAS_TDECK_GT911) || defined(HAS_TDECK_PRO) || defined(HAS_THINKNODE_M9)   // wallpaper picker — SD/SPIFFS-backed, board-agnostic
+#if defined(HAS_TDECK_GT911) || defined(HAS_TDECK_PRO) || defined(HAS_THINKNODE_M9) || defined(TLORA_PAGER)   // wallpaper picker — SD/SPIFFS-backed, board-agnostic
 static lv_obj_t* s_lockwall_picker = nullptr;
 static char s_lockwall_paths[24][TOUCH_LOCK_WALLPAPER_MAXLEN];
 static int  s_lockwall_count = 0;
@@ -53438,6 +53478,12 @@ static void powerOffNow() {
                                                  : TR("Powering off\xE2\x80\xA6 press reset to wake"), 1500);
 #elif defined(HAS_TDECK_GT911)
     g_lv.task->showAlert(TR("Powering off\xE2\x80\xA6 click trackball to wake"), 1500);
+#elif defined(TLORA_PAGER)
+    // On battery the charger opens its battery switch (a true power-off, see below),
+    // and only the power key brings it back; on USB it stays the BOOT-wake deep sleep.
+    g_lv.task->showAlert(board.externalPowerPresent() == 0
+                           ? TR("Powering off\xE2\x80\xA6 hold the power key to switch on")
+                           : TR("Powering off\xE2\x80\xA6 press BOOT to wake"), 1500);
 #else
     g_lv.task->showAlert(TR("Powering off\xE2\x80\xA6 press BOOT to wake"), 1500);
 #endif
@@ -53478,6 +53524,11 @@ static void powerOffNow() {
 #endif
   display.panelSleep(true);
   display.turnOff();
+  // Everything is parked and saved: on battery, open the charger's battery switch.
+  // That is the vendor's power-off (about 26 µA, against about 530 µA asleep) and
+  // it does not return. On USB, or if the charger does not take it, carry on into
+  // the deep sleep below exactly as before.
+  board.enterShipMode();
 #endif
 #if defined(HELTEC_LORA_V4_R8)
   // Park everything before sleeping — without this the SX1262 stayed in RX
@@ -78029,6 +78080,19 @@ void UITask::newMsgImpl(uint8_t path_len, const char* from_name, const char* tex
     }
   }
 #endif
+#if defined(TLORA_PAGER)
+  // Vibration motor: the same messages that would chime (the per-kind switches,
+  // the channel mute bits and Do Not Disturb all apply), but its own switch rather
+  // than the Sound master, so a pager can be silent and still buzz in a pocket.
+  if (touchPrefsGetVibrate() && !dndActive()) {
+    const bool is_mention = channel && text && textMentionsMe(text);
+    const bool is_dm = (g_last_event == UIEventType::contactMessage);
+    const uint8_t cmute = channel ? touchPrefsGetChannelMute(thread) : 0;
+    if (is_mention && touchPrefsGetSoundMentions() && !(cmute & TOUCH_CHMUTE_MEN)) pagerHapticsPlay(PagerHaptic::Mention);
+    else if (is_dm) { if (touchPrefsGetSoundDirect()) pagerHapticsPlay(PagerHaptic::Direct); }
+    else if (touchPrefsGetSoundMessages() && !(cmute & TOUCH_CHMUTE_MSG))          pagerHapticsPlay(PagerHaptic::Message);
+  }
+#endif
 #if defined(HAS_TOUCH_UI)
   // "At a glance": device unlocked but idle-dimmed to off -- light the plain
   // black glance overlay instead of the full app (see atGlanceShow() above).
@@ -79954,6 +80018,9 @@ void UITask::loop() {
     // you peek, then frozen there for as long as the screen stays lit.
     serviceLockscreen();
   }
+#if defined(TLORA_PAGER)
+  pagerHapticsIdleTick();   // vibration motor back to standby once its pattern has run out
+#endif
 #elif defined(HAS_M9_KEYBOARD)
   // Own the stall buckets for everything a keypress triggers. The "ui:input"
   // checkpoint further up is inside #if CAP_TRACKBALL, which is 0 on this board

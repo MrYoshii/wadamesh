@@ -53,6 +53,13 @@ jobs:
           pio run -t mergebin -e "${{ matrix.env }}" 2>&1 | tee build.log
           exit ${PIPESTATUS[0]}
 
+      - name: Report compiler errors
+        if: failure()
+        run: |
+          grep -E "(error|Error)[: ]" build.log | grep -v "^Compiling" | head -40 | while IFS= read -r l; do
+            echo "::error::${l//%/%25}"
+          done
+
       - name: Upload firmware
         if: success() && startsWith(matrix.env, 'tlora_pager')
         uses: actions/upload-artifact@v4
