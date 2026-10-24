@@ -1,0 +1,71 @@
+name: pager-dev-build
+
+# Development build for the T-LoRa Pager hardware work on this fork.
+# Every push to a pager-* branch builds both Pager radio variants (plus a few
+# other boards that share the touched UI code, as a regression check) and
+# attaches the flashable images as workflow artifacts.
+#
+# Not meant for upstream: drop this file before opening the PR.
+
+on:
+  push:
+    branches: ['pager-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - tlora_pager_sx1262_companion_radio_touch
+          - tlora_pager_lr1121_companion_radio_touch
+          - LilyGo_TDeck_companion_radio_touch
+          - ThinkNode_M9_companion_radio_touch
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio/libdeps
+          key: pio-dev-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-dev-${{ matrix.env }}-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build
+        run: |
+          unset WIFI_SSID WIFI_PWD
+          TAG="dev-${GITHUB_SHA::7}"
+          export PLATFORMIO_BUILD_FLAGS="-DFIRMWARE_RELEASE_TAG='\"${TAG}\"' -DFIRMWARE_VERSION='\"wadamesh ${TAG}\"'"
+          pio run -t mergebin -e "${{ matrix.env }}" 2>&1 | tee build.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Upload firmware
+        if: success() && startsWith(matrix.env, 'tlora_pager')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.env }}-${{ github.sha }}
+          path: |
+            .pio/build/${{ matrix.env }}/firmware-merged.bin
+            .pio/build/${{ matrix.env }}/firmware.bin
+          if-no-files-found: error
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-${{ matrix.env }}-${{ github.sha }}
+          path: build.log
