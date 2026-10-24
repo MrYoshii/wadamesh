@@ -41,11 +41,32 @@ Still open, in priority order:
 2. **USB companion device-profile frame is still untested** (⑦b). Remove the
    temporary `[DISP]` register readback in `ST7796LCDDisplay::begin()` once it
    passes.
-3. Lock-screen wallpaper SD scanning is still T-Deck/M9-only (risk 1h).
+3. ~~Lock-screen wallpaper SD scanning is still T-Deck/M9-only (risk 1h).~~
+   Done (2026-10): Settings > Lock screen shows the Wallpaper row on the
+   pager; the file manager's "Set as wallpaper" already worked here.
 4. `deploy/flasher/` now carries pager cards + manifests for parity, but **no
    deploy script publishes that directory** (`deploy-site.sh` ships
    `deploy/site/` only) and `flasher.wadamesh.com` 301s to the apex. Decide
    whether to wire it into a deploy target or retire it.
+
+### Peripherals brought up (2026-10)
+
+The chips that had power but no driver now do something:
+
+| Chip | What it does now | Where |
+|---|---|---|
+| **DRV2605** haptic driver (0x5A) | Vibrates for message / DM / @mention (own patterns), following the per-kind sound switches, channel mutes and DND but NOT the Sound master switch. Optional light click per key and knob detent. Settings > Sound > Vibration. Parked in standby between patterns. | `PagerHaptics.*`, `UITask.cpp` |
+| **BQ25896** charger (0x6B) | Charging icon from the charger's input status. The gauge reads the *cell*, which never rises above the charge target, so the shared voltage heuristic could never show charging on this board. | `TLoraPagerBoard::externalPowerPresent()`, `batteryIsCharging()` |
+| **BQ25896** ship mode | Power off on battery opens the battery switch (vendor figure ~26 µA vs ~530 µA deep sleep); the power key (QON) switches it back on. On USB it keeps the BOOT-wake deep sleep. | `TLoraPagerBoard::enterShipMode()`, `powerOffNow()` |
+| **BQ27220** gauge | Battery % from the gauge's StateOfCharge (as on the T-Display P4, #273). Design/full capacity set once to the fitted 1500 mAh pack, as LilyGoLib does; a refusal is recorded in NVS (`pagerhw/gauge_fail`) so it is not retried every boot. | `pagerConfigureGauge()`, `batteryPercentFromMv()` |
+| **BHI260AP** IMU (0x28) | `wada.sys.accel()` / `caps().accel` for Lua apps. The hub firmware (Klio image, ~120 KB) uploads on the first read, not at boot; the accelerometer stops 3 s after the last read. Axes remapped by the hub (`BOTTOM_LAYER_TOP_LEFT_CORNER`, vendor). | `PagerImu.*`, `luaHostAccel()` |
+
+Still not driven: the **ST25R3916 NFC** reader (needs ST's RFAL stack) and
+the codec's microphone input.
+
+**Needs hardware confirmation**: ship mode wake via the power key, the
+charging icon on/off with USB, the gauge percent after the capacity write,
+the vibration patterns' strength, and the IMU upload time / axis signs.
 
 Risk 11 (keyboard/encoder scroll not repainting) is **accepted as
 workaround-final**: the Alt+turn free-scroll gesture is the intended fix for

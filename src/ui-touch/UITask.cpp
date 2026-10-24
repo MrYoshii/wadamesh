@@ -198,6 +198,7 @@ static_assert(ChannelSenderSplit::kMaxWireName >= (size_t)UITask::MAX_SENDER_NAM
   #endif
   #if defined(TLORA_PAGER)
     #include "PagerHaptics.h"          // DRV2605 vibration motor (variants/lilygo_tlora_pager)
+    #include "PagerImu.h"              // BHI260AP accelerometer, wada.sys.accel() (luaHostAccel)
   #endif
   #if defined(HAS_PAGER_ENCODER)
     #include <helpers/input/PagerEncoder.h>
@@ -13198,6 +13199,19 @@ static void toggleLoudAlertsCb(lv_event_t* e) {
 #endif
 
 #if defined(TLORA_PAGER)
+// "Vibrate on keys": a light click per keypress and per knob detent. Cached, since
+// it is read on every key; -1 = not loaded from NVS yet.
+static int8_t s_vib_input = -1;
+static inline bool vibInputOn() {
+  if (s_vib_input < 0) s_vib_input = touchPrefsGetVibrateInput() ? 1 : 0;
+  return s_vib_input != 0;
+}
+static void toggleVibrateInputCb(lv_event_t* e) {
+  if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
+  const bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+  touchPrefsSetVibrateInput(on);
+  s_vib_input = on ? 1 : 0;
+}
 // Vibration switch (the Pager's DRV2605 motor). Turning it on gives one buzz, so
 // the setting proves itself under your thumb.
 static void toggleVibrateCb(lv_event_t* e) {
@@ -18529,6 +18543,8 @@ static void buildSoundPage() {
     setSwitchRow(c, "Vibrate", "Buzzes for the same messages as the sound below, even with Sound off. "
                  "Do Not Disturb and muted channels stay still.",
                  touchPrefsGetVibrate(), toggleVibrateCb);
+    setSwitchRow(c, "Vibrate on keys", "A light click for each keypress and each turn of the knob.",
+                 vibInputOn(), toggleVibrateInputCb);
   }
 #endif
   {
@@ -47859,6 +47875,9 @@ static void updatePagerEncoder(unsigned long now) {
   // matching TLORA_PAGER fix) and the screen dimmed mid-use.
   if ((delta != 0 || held) && g_lv.task) g_lv.task->noteUserInput();
   if (delta != 0 || held) noteKbActivity();   // same activity counts for the keyboard-backlight auto mode
+#if defined(TLORA_PAGER)
+  if (delta != 0 && vibInputOn()) pagerHapticsPlay(PagerHaptic::Tick);   // one click per detent batch
+#endif
 
   // The PIN screen: turning walks its number pad, a click presses the lit key.
   {
@@ -71147,19 +71166,17 @@ bool luaHostGps(double* lat, double* lon, int* sats, int* alt_m, uint32_t* fix_t
 }
 #endif  // CAP_LUA_SDK_EXT || CAP_CONSOLE
 
-#if CAP_COMPASS
-// wada.sys.compass(). Raw field vector from the board's magnetometer; the only
-// one wired so far is the M9's QMC6309 (variants/thinknode_m9/M9Compass.*).
-// Runs on the UI thread like every other luaHost* bridge; the driver's I2C
-// reads are short and the bus (Wire) has no other task on it.
 #if CAP_IMU
 // wada.sys.accel(). Acceleration in g, sensor frame, as the chip reports it —
 // the mapping to the device's own axes is the consumer's, for the same reason
-// as the magnetometer: it is not documented for this board and had to be
-// measured.
+// as the magnetometer: it is not documented for the M9 and had to be measured.
+// (The Pager's sensor hub applies LilyGo's own remap for that board.) Outside
+// the CAP_COMPASS block: the Pager has an accelerometer and no magnetometer.
 bool luaHostAccel(float* x, float* y, float* z) {
 #if defined(HAS_M9_IMU)
   return m9ImuRead(x, y, z);
+#elif defined(TLORA_PAGER)
+  return pagerImuRead(x, y, z);
 #else
   (void)x; (void)y; (void)z;
   return false;
@@ -71167,6 +71184,11 @@ bool luaHostAccel(float* x, float* y, float* z) {
 }
 #endif  // CAP_IMU
 
+#if CAP_COMPASS
+// wada.sys.compass(). Raw field vector from the board's magnetometer; the only
+// one wired so far is the M9's QMC6309 (variants/thinknode_m9/M9Compass.*).
+// Runs on the UI thread like every other luaHost* bridge; the driver's I2C
+// reads are short and the bus (Wire) has no other task on it.
 bool luaHostCompass(float* x, float* y, float* z, bool* overflow) {
 #if defined(HAS_M9_COMPASS)
   return m9CompassRead(x, y, z, overflow);
@@ -79997,6 +80019,9 @@ void UITask::loop() {
 #if defined(HAS_TDECK_PRO)
       noteKbActivity();   // Pro keypresses re-arm keyboard-light Auto mode
 #endif
+#if defined(TLORA_PAGER)
+      if (vibInputOn()) pagerHapticsPlay(PagerHaptic::Tick);
+#endif
       handleHwKey(key);
     }
     updatePagerAltShiftChord();
@@ -80020,6 +80045,7 @@ void UITask::loop() {
   }
 #if defined(TLORA_PAGER)
   pagerHapticsIdleTick();   // vibration motor back to standby once its pattern has run out
+  pagerImuIdleTick();       // and the accelerometer off once no app is reading it
 #endif
 #elif defined(HAS_M9_KEYBOARD)
   // Own the stall buckets for everything a keypress triggers. The "ui:input"

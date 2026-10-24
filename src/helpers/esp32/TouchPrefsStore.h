@@ -617,6 +617,8 @@ bool    touchPrefsGetGlanceWhenLocked();       // "at a glance" also fires while
 void    touchPrefsSetGlanceWhenLocked(bool on);
 bool    touchPrefsGetVibrate();               // Pager: vibrate for messages that would chime (default true)
 void    touchPrefsSetVibrate(bool on);
+bool    touchPrefsGetVibrateInput();          // Pager: a light click per key / knob detent (default false)
+void    touchPrefsSetVibrateInput(bool on);
 bool    touchPrefsGetGlanceEnabled();          // master "at a glance" feature toggle (default true)
 void    touchPrefsSetGlanceEnabled(bool on);
 
