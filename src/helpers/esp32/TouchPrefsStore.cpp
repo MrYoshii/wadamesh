@@ -2536,6 +2536,8 @@ uint32_t touchPrefsGetBattDayKey()        { if (!s_begun) touchPrefsBegin(); ret
 void     touchPrefsSetBattDayKey(uint32_t k) { if (!s_begun) touchPrefsBegin(); prefsPutUInt("bat_day", k); }
 uint32_t touchPrefsGetBattDayMah()        { if (!s_begun) touchPrefsBegin(); return s_prefs.getUInt("bat_mah", 0xFFFF0000u); }
 void     touchPrefsSetBattDayMah(uint32_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUInt("bat_mah", v); }
+uint32_t touchPrefsGetBattUse()          { if (!s_begun) touchPrefsBegin(); return s_prefs.getUInt("bat_use", 0); }
+void     touchPrefsSetBattUse(uint32_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUInt("bat_use", v); }
 bool touchPrefsGetFaceDownQuiet()       { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("face_down", 0) != 0; }
 void touchPrefsSetFaceDownQuiet(bool on) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("face_down", on ? 1 : 0); }
 bool touchPrefsGetPickupWake()         { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("pick_wake", 0) != 0; }

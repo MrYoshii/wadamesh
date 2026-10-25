@@ -129,6 +129,14 @@ public:
     return gauge_info_;
   }
 
+  // The fitted pack's capacity (Settings > Battery; LilyGo's pack is 1500 mAh).
+  // setBatteryCapacity() stores it and writes it to the gauge as its design and
+  // full-charge capacity (config-update mode, about a second); true when the
+  // gauge reads it back. batteryCapacitySetting() is the stored choice.
+  bool     setBatteryCapacity(uint16_t mah);
+  uint16_t batteryCapacitySetting();
+  uint16_t batteryDesignCapacity() const { return gauge.getDesignCapacity(); }   // as last read, 0 = never
+
   const char* getManufacturerName() const{
     return "LilyGo T-LoRa Pager";
   }

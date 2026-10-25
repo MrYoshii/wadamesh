@@ -18966,6 +18966,53 @@ static void buildCareCard() {
   setSwitchRow(c, "Low battery warning", "Warns with a vibration at 20%, again at 10%, and switches the Pager off "
                "at 3%, so the battery is never run flat.", touchPrefsGetLowBattWarn(), lowBattToggleCb);
 }
+// The fitted pack's capacity. The steps only change the figure shown; "Apply"
+// writes it to the fuel gauge (config-update mode, about a second), after a confirm.
+static uint16_t  s_cap_pending = 0;
+static lv_obj_t* s_cap_lbl = nullptr;
+static void capLabelRefresh() {
+  if (!s_cap_lbl || !lv_obj_is_valid(s_cap_lbl)) return;
+  lv_label_set_text_fmt(s_cap_lbl, "%u", (unsigned)s_cap_pending);
+}
+static void capStep(int d) {
+  int v = (int)s_cap_pending + d;
+  if (v < 500) v = 500;
+  if (v > 10000) v = 10000;
+  s_cap_pending = (uint16_t)v;
+  capLabelRefresh();
+}
+static void capMinusCb(lv_event_t* e) { if (lv_event_get_code(e) == LV_EVENT_CLICKED) capStep(-100); }
+static void capPlusCb(lv_event_t* e)  { if (lv_event_get_code(e) == LV_EVENT_CLICKED) capStep(+100); }
+static void capApplyConfirmed() {
+  const bool ok = board.setBatteryCapacity(s_cap_pending);
+  if (g_lv.task) g_lv.task->showAlert(ok ? TR("Fuel gauge set. It relearns the pack over the next charges.")
+                                         : TR("The fuel gauge did not take the new capacity"), 3500);
+}
+static void capApplyCb(lv_event_t* e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  if (s_cap_pending == board.batteryDesignCapacity()) {
+    if (g_lv.task) g_lv.task->showAlert(TR("The fuel gauge is already set to this"), 1500);
+    return;
+  }
+  static char q[200];
+  snprintf(q, sizeof q, TR("Set the battery to %u mAh?\nOnly if that is the pack fitted. The percentage and time "
+                           "left are recalculated and settle over the next full charge."), (unsigned)s_cap_pending);
+  showConfirm(q, TR("Apply"), capApplyConfirmed);
+}
+static void capDefaultCb(lv_event_t* e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  s_cap_pending = 1500;
+  capLabelRefresh();
+}
+static void buildCapacityCard() {
+  lv_obj_t* c = setCard("Battery pack");
+  s_cap_pending = board.batteryCapacitySetting();
+  s_cap_lbl = setStepperRow(c, "Capacity (mAh)", "LilyGo fits 1500 mAh. Change it only for a different pack.",
+                            "-100", "+100", capMinusCb, capPlusCb, nullptr, nullptr);
+  capLabelRefresh();
+  setActionRow(c, LV_SYMBOL_OK, "Apply to the fuel gauge", nullptr, capApplyCb);
+  setActionRow(c, LV_SYMBOL_REFRESH, "Back to 1500 mAh", nullptr, capDefaultCb);
+}
 static void buildChargeCard() {
   lv_obj_t* c = setCard("Charge limits");
   setNote(c, "The defaults are the safe ones for this battery. Anything past them asks first.");
@@ -19011,6 +19058,7 @@ static void buildBatteryPage() {
   }
   {
     buildCareCard();
+    buildCapacityCard();
     buildChargeCard();
 #else
     // Calibrate: the current voltage counts as 100% (packs whose full voltage is not
@@ -24882,6 +24930,57 @@ static void battDayTick(int16_t current_ma, uint32_t dt_ms) {
     s_bday_today += (float)(-current_ma) * (float)dt_ms / 3600000.0f;
 }
 #endif
+#if defined(TLORA_PAGER)
+// ---- Time left at your usage (Pager) ---------------------------------------------
+// The gauge's own time-to-empty divides by its average current of the last
+// minute or so: 6 h with the screen on, 30 h with it off, jumping whenever the
+// screen changes. This one divides the remaining mAh by what the Pager has drawn
+// on battery over the last hours instead (a running average with a 4 h time
+// constant, screen on and off weighted by how long each lasted), so it says how
+// long the battery lasts the way it is being used. It starts as a plain average
+// and needs 30 min on battery before it is used; until then, and on USB, the
+// gauge's figure stands. Kept in NVS with the daily count ("bat_use").
+static float    s_use_ma = 0.0f;         // average draw on battery, mA
+static uint32_t s_use_secs = 0;          // battery time it has seen, s (capped)
+static bool     s_use_loaded = false;
+static uint32_t s_use_saved = 0;
+static constexpr float    kUseTauSecs = 4.0f * 3600.0f;
+static constexpr uint32_t kUseMinSecs = 1800;
+static void battUseLoad() {
+  if (s_use_loaded) return;
+  s_use_loaded = true;
+  const uint32_t v = touchPrefsGetBattUse();
+  s_use_ma   = (float)(v & 0xFFFF) / 10.0f;
+  s_use_secs = (v >> 16) * 60u;
+  s_use_saved = v;
+#if defined(WADA_WEB)
+  if (const char* e = getenv("WADA_SIM_USE_MA")) { s_use_ma = (float)atof(e); s_use_secs = 3 * 3600; }   // simulator: a learned average
+#endif
+}
+static void battUseTick(int16_t current_ma, uint32_t dt_ms) {
+  battUseLoad();
+  if (current_ma >= -2 || dt_ms == 0 || dt_ms > 120000u) return;   // charging, idle on USB, or a gap
+  if (board.externalPowerPresent() != 0) return;
+  const float dt = (float)dt_ms / 1000.0f;
+  const float span = (float)s_use_secs + dt;
+  const float a = dt / (span < kUseTauSecs ? span : kUseTauSecs);   // plain average until it has 4 h
+  s_use_ma += a * ((float)(-current_ma) - s_use_ma);
+  if (s_use_secs < 65000u * 60u) s_use_secs += (uint32_t)dt;
+}
+static void battUseSave() {
+  const uint32_t ma10 = (uint32_t)(s_use_ma * 10.0f);
+  const uint32_t mins = s_use_secs / 60u;
+  const uint32_t v = (mins > 0xFFFF ? 0xFFFFu : mins) << 16 | (ma10 > 0xFFFF ? 0xFFFFu : ma10);
+  if (v != s_use_saved) { touchPrefsSetBattUse(v); s_use_saved = v; }
+}
+// Minutes left at the usual draw, or 0xFFFF when there is no such figure yet.
+static uint16_t battUseMinutesLeft(uint16_t remaining_mah) {
+  battUseLoad();
+  if (s_use_secs < kUseMinSecs || s_use_ma < 1.0f) return 0xFFFF;
+  const float m = (float)remaining_mah / s_use_ma * 60.0f;
+  return m > 65000.0f ? 65000 : (uint16_t)m;
+}
+#endif
 static void batteryLogTick(uint32_t now_ms) {
   static uint32_t s_next_ms = 0;
 #if defined(TLORA_PAGER)
@@ -24895,7 +24994,7 @@ static void batteryLogTick(uint32_t now_ms) {
     const uint32_t dt = s_ma_ms ? now_ms - s_ma_ms : 0;
     s_ma_ms = now_ms ? now_ms : 1;
     const TLoraPagerBoard::GaugeInfo g = board.getGaugeInfo();
-    if (g.valid) { s_ma_sum += g.current_ma; ++s_ma_n; battDayTick(g.current_ma, dt); }
+    if (g.valid) { s_ma_sum += g.current_ma; ++s_ma_n; battDayTick(g.current_ma, dt); battUseTick(g.current_ma, dt); }
   }
 #endif
   if (s_next_ms == 0) { s_next_ms = now_ms + 30000u; return; }
@@ -24908,6 +25007,7 @@ static void batteryLogTick(uint32_t now_ms) {
   const int ma = has_ma ? (int)(s_ma_sum / (int32_t)s_ma_n) : 0;
   s_ma_sum = 0; s_ma_n = 0;
   if ((uint16_t)s_bday_today != s_bday_saved) battDaySave();   // at most once per log line
+  battUseSave();
   batteryLogAppend((uint32_t)time(nullptr), mv, batteryPercentFromMv(mv),
                    (uint16_t)getCpuFrequencyMhz(), has_ma, ma);
 #else
@@ -24926,7 +25026,8 @@ static lv_obj_t*   s_bg_misc = nullptr;   // "24.1 °C · 12 cycles · health 99
 static lv_obj_t*   s_bg_day  = nullptr;   // "Today 212 mAh · yesterday 1034 mAh"
 static lv_timer_t* s_bg_timer = nullptr;
 static void fmtMinutes(char* out, size_t cap, uint16_t mins) {
-  if (mins >= 60) snprintf(out, cap, "%u h %02u min", (unsigned)(mins / 60), (unsigned)(mins % 60));
+  if (mins >= 600) snprintf(out, cap, "%u h", (unsigned)((mins + 30) / 60));   // past 10 h the minutes are noise
+  else if (mins >= 60) snprintf(out, cap, "%u h %02u min", (unsigned)(mins / 60), (unsigned)(mins % 60));
   else            snprintf(out, cap, "%u min", (unsigned)mins);
 }
 static void batteryGaugeRefresh() {
@@ -24960,6 +25061,11 @@ static void batteryGaugeRefresh() {
   if (charging && g.to_full_min != 0xFFFF) {
     fmtMinutes(t, sizeof t, g.to_full_min);
     snprintf(b, sizeof b, TR("%u / %u mAh \xC2\xB7 full in %s"), (unsigned)g.remaining_mah, (unsigned)g.full_mah, t);
+  } else if (!charging && battUseMinutesLeft(g.remaining_mah) != 0xFFFF) {
+    // At the usual draw (battUseTick); the present draw is the line above.
+    fmtMinutes(t, sizeof t, battUseMinutesLeft(g.remaining_mah));
+    snprintf(b, sizeof b, TR("%u / %u mAh \xC2\xB7 %s left at your usage"),
+             (unsigned)g.remaining_mah, (unsigned)g.full_mah, t);
   } else if (!charging && g.to_empty_min != 0xFFFF) {
     fmtMinutes(t, sizeof t, g.to_empty_min);
     snprintf(b, sizeof b, TR("%u / %u mAh \xC2\xB7 %s left"), (unsigned)g.remaining_mah, (unsigned)g.full_mah, t);
@@ -50024,7 +50130,9 @@ static void pagerGaugeNote(char* out, size_t cap) {
     return;
   }
   const int ma = g.current_ma < 0 ? -g.current_ma : g.current_ma;
-  const uint16_t mins = g.current_ma > 0 ? g.to_full_min : g.to_empty_min;
+  uint16_t mins = g.current_ma > 0 ? g.to_full_min : g.to_empty_min;
+  if (g.current_ma <= 0 && battUseMinutesLeft(g.remaining_mah) != 0xFFFF)
+    mins = battUseMinutesLeft(g.remaining_mah);   // at the usual draw, not the last minute's
   if (mins != 0xFFFF && mins > 0)
     snprintf(out, cap, g.current_ma > 0 ? TR("%d mA \xC2\xB7 %u:%02u to full") : TR("%d mA \xC2\xB7 %u:%02u left"),
              ma, (unsigned)(mins / 60), (unsigned)(mins % 60));

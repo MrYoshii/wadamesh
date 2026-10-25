@@ -75,6 +75,14 @@ Battery care and quiet modes (all Pager-only, gated `TLORA_PAGER`):
 - **Daily use** in the battery popup: mAh drawn today and yesterday, integrated
   from the 10 s gauge samples (`battDayTick()`), kept in NVS (`bat_day`,
   `bat_mah`, not in the backup).
+- **Battery capacity** (Settings > Battery > Battery pack, default 1500 mAh):
+  -/+100 mAh, "Apply" writes the gauge's design and full-charge capacity after a
+  confirm (`TLoraPagerBoard::setBatteryCapacity()`, stored as `pagerhw/cap_mah`;
+  boot re-applies it once per target, `cap_try`, replacing the old `gauge_try`).
+- **Time left at your usage**: remaining mAh divided by a running average of the
+  draw on battery (4 h time constant, plain average until then, used after 30 min
+  of battery time, NVS `bat_use`) instead of the gauge's last-minute
+  time-to-empty; popup, lock screen and screensaver. On USB the gauge's figures stay.
 - **Shift + knob**: Shift + turn = brightness, Shift + click = switch the knob to
   volume; a level pill shows it (`pagerModifierKnob()`). Needs
   `pagerKeyboardShiftHeld()` (new, additive getter in the shared keyboard driver).

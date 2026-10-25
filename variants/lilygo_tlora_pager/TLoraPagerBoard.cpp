@@ -14,21 +14,25 @@ static PowersBQ25896 s_charger;
 // for 3000 mAh, and its state of charge is only as good as that figure.
 #define PAGER_GAUGE_DESIGN_MAH 1500
 
-// Programs the gauge's design/full-charge capacity once, the way LilyGoLib does
-// for this board. The gauge sits on the battery, so the setting outlives
-// reflashes and power-off; afterwards the design-capacity check alone skips this.
-// Every attempt is recorded (ok or not), so a gauge that accepts the write but
-// reads back something else, or refuses it (sealed with a custom key), is not put
-// through config-update mode again on every boot.
+// The capacity the gauge is set to: the fitted pack (1500 mAh) unless the user
+// set another in Settings > Battery (NVS "pagerhw/cap_mah"). The gauge sits on
+// the battery, so the setting outlives reflashes and power-off; boot only writes
+// it when the gauge reads something else. Each target is tried once ("cap_try"),
+// so a gauge that refuses the write (sealed with a custom key) or reads back
+// something else is not put through config-update mode on every boot.
+static uint16_t pagerCapTarget(Preferences& p) {
+  const uint16_t v = p.getUShort("cap_mah", PAGER_GAUGE_DESIGN_MAH);
+  return (v >= 300 && v <= 20000) ? v : PAGER_GAUGE_DESIGN_MAH;
+}
 static void pagerConfigureGauge(GaugeBQ27220& gauge) {
   if (!gauge.refresh()) return;                 // not answering: try next boot
-  if (gauge.getDesignCapacity() == PAGER_GAUGE_DESIGN_MAH) return;
   Preferences p;
   if (!p.begin("pagerhw", false)) return;
-  if (!p.getUChar("gauge_try", 0)) {
-    const bool ok = gauge.setNewCapacity(PAGER_GAUGE_DESIGN_MAH, PAGER_GAUGE_DESIGN_MAH);
-    Serial.printf("[BOOT] bq27220 capacity -> %u mAh %s\n", PAGER_GAUGE_DESIGN_MAH, ok ? "ok" : "FAILED");
-    p.putUChar("gauge_try", 1);
+  const uint16_t want = pagerCapTarget(p);
+  if (gauge.getDesignCapacity() != want && p.getUShort("cap_try", 0) != want) {
+    const bool ok = gauge.setNewCapacity(want, want);
+    Serial.printf("[BOOT] bq27220 capacity -> %u mAh %s\n", (unsigned)want, ok ? "ok" : "FAILED");
+    p.putUShort("cap_try", want);
   }
   p.end();
 }
@@ -341,6 +345,35 @@ void TLoraPagerBoard::chargeEnableApply() {
 void TLoraPagerBoard::setChargeCare(bool on) {
   care_on_ = on;
   chargeCareCheck(batt_soc_);
+}
+
+bool TLoraPagerBoard::setBatteryCapacity(uint16_t mah) {
+  if (mah < 300 || mah > 20000) return false;
+  Preferences p;
+  if (!p.begin("pagerhw", false)) return false;
+  p.putUShort("cap_mah", mah);
+  bool ok = false;
+  if (gauge.refresh()) {
+    if (gauge.getDesignCapacity() == mah) {
+      ok = true;
+    } else {
+      gauge.setNewCapacity(mah, mah);           // design and full charge: the gauge relearns from there
+      p.putUShort("cap_try", mah);
+      ok = gauge.refresh() && gauge.getDesignCapacity() == mah;
+    }
+  }
+  p.end();
+  batt_ms_ = 0;                                  // the next battery call reads the gauge afresh
+  Serial.printf("[POWER] battery capacity %u mAh %s\n", (unsigned)mah, ok ? "ok" : "NOT TAKEN");
+  return ok;
+}
+
+uint16_t TLoraPagerBoard::batteryCapacitySetting() {
+  Preferences p;
+  if (!p.begin("pagerhw", true)) return PAGER_GAUGE_DESIGN_MAH;
+  const uint16_t v = pagerCapTarget(p);
+  p.end();
+  return v;
 }
 
 void TLoraPagerBoard::setChargeLimits(uint16_t ma, uint16_t mv) {

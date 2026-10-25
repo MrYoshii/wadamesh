@@ -45,6 +45,10 @@ public:
       return { true, (int16_t)(476 + (int)(millis() / 1000 % 9)), 1980, 1131, 1488, 0xFFFF, 47, 263, 12, 99 };
     return { true, (int16_t)(-38 - (int)(millis() / 1000 % 9)), -152, 1131, 1488, 1615, 0xFFFF, 241, 12, 99 };
   }
+  uint16_t sim_cap_ = 1500;
+  bool     setBatteryCapacity(uint16_t mah) { sim_cap_ = mah; return true; }
+  uint16_t batteryCapacitySetting() { return sim_cap_; }
+  uint16_t batteryDesignCapacity() const { return sim_cap_; }
   int  externalPowerPresent() { return (simCharging() || simCareHold()) ? 1 : 0; }
   static bool simCareHold() { static const bool h = getenv("WADA_SIM_CARE_HOLD") != nullptr; return h; }
   ChargeState chargeState() { return ChargeState::NotCharging; }
