@@ -1,7 +1,7 @@
 # wadamesh language file
 # canonical source - translators: edit this file and PR it
 # code: de
-# ver: 31
+# ver: 32
 # name: Deutsch
 # base: de
  (device behind)	 (Gerät geht nach)
@@ -2293,3 +2293,6 @@ Quiet now	Jetzt ruhig
 Do Not Disturb until you switch it off. Holding Shift does the same from anywhere.	Nicht stören, bis du es ausschaltest. Shift halten macht dasselbe von überall.
 Quiet when face down	Ruhig, wenn umgedreht
 Lying face down, the screen goes off and the Pager stays silent (no sound, no vibration). Picking it up ends it. Keeps the motion sensor on, a little more power.	Mit dem Bildschirm nach unten geht er aus und der Pager bleibt still (kein Ton, keine Vibration). Aufheben beendet es. Hält den Bewegungssensor an, etwas mehr Stromverbrauch.
+Starting the motion sensor…	Bewegungssensor startet…
+Wake when picked up	Beim Hochheben aufwecken
+Lifting the Pager off the table turns the screen on (a locked Pager shows its lock screen). Only after it lay still, so it stays dark in a bag or pocket.	Hebst du den Pager vom Tisch, geht der Bildschirm an (gesperrt zeigt er den Sperrbildschirm). Nur wenn er vorher ruhig lag, damit er in Tasche oder Hosentasche dunkel bleibt.
