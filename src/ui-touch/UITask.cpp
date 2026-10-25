@@ -37519,6 +37519,9 @@ static void renderMapTiles() {
   lv_label_set_text(s_map_status_lbl, TR("No tiles (non-ESP32)"));
 #endif
   lv_obj_clear_flag(s_map_status_lbl, LV_OBJ_FLAG_HIDDEN);
+#if defined(TLORA_PAGER)
+  lv_obj_move_foreground(s_map_status_lbl);   // its card covers the crosshair (see its setup)
+#endif
 }
 
 // ----- Markers -----
@@ -40211,6 +40214,19 @@ static void makeMapTab(lv_obj_t* tab) {
       "Upload a tile pack to /tiles/<z>/<x>/<y>.jpg "
       "with the host-side generator."));
   lv_obj_center(s_map_status_lbl);
+#if defined(TLORA_PAGER)
+  // The 150 px canvas puts the centre crosshair right inside these lines. Give
+  // the text a card of its own (kept in front of the markers when shown) so the
+  // crosshair sits behind it instead of through it.
+  lv_obj_set_width(s_map_status_lbl, k_map_canvas_w - 2 * 44);   // clear of the button column
+  lv_obj_set_style_bg_color(s_map_status_lbl, lv_color_hex(COLOR_PANEL), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(s_map_status_lbl, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_radius(s_map_status_lbl, 8, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(s_map_status_lbl, 6, LV_PART_MAIN);
+  lv_obj_set_style_border_color(s_map_status_lbl, lv_color_hex(COLOR_BORDER), LV_PART_MAIN);
+  lv_obj_set_style_border_width(s_map_status_lbl, 1, LV_PART_MAIN);
+  lv_obj_center(s_map_status_lbl);
+#endif
 
   // Bottom corner read-outs — transparent black text over the map, tucked into
   // the bottom corners UNDER the tab-bar icons: coords bottom-LEFT, marker /
