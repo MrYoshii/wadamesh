@@ -153,6 +153,13 @@ public:
   // -1 too cold, 0 charging allowed. See chargeThermalCheck().
   int chargeTempBlock() const { return charge_temp_block_; }
 
+  // The limits from Settings > Battery > Charging: fast-charge current (mA, 64 mA
+  // steps) and charge voltage (mV, 16 mV steps), and the temperature guard's upper
+  // limit in 0.1 deg C (0 = guard off). begin() starts at the safe defaults; the
+  // UI applies the stored choice once it has loaded the prefs.
+  void setChargeLimits(uint16_t ma, uint16_t mv);
+  void setChargeTempMax(int16_t c10);
+
   // Real power-off: opens the charger's battery switch (BQ25896 ship mode,
   // BATFET_DIS), which takes the whole board down to the charger's own leakage,
   // about 26 µA against about 530 µA in deep sleep. Only the power key (the
@@ -179,5 +186,6 @@ private:
   uint8_t  sys_stat_ = 0;   // REG0B as last read
   uint32_t chg_ms_ = 0;     // when the charger was last read, 0 = never
   int8_t   charge_temp_block_ = 0;   // chargeTempBlock()
+  int16_t  chg_tmax_c10_ = 450;      // setChargeTempMax(); 0 = guard off
   SemaphoreHandle_t expander_mutex_ = nullptr;
 };

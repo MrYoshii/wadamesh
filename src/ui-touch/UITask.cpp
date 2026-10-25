@@ -18817,6 +18817,83 @@ static void buildGeneralPage() {
 }
 
 // ---- Settings > Battery ------------------------------------------------------------
+#if defined(TLORA_PAGER)
+// ---- Settings > Battery > Charging (Pager) ----------------------------------------
+// The charge current, the charge voltage and the temperature guard. The defaults
+// are the safe ones (LilyGoLib's figures for this 1500 mAh pack, 0-45 deg C); any
+// choice past them asks first, saying plainly what it risks. Applied live.
+static const uint16_t k_chg_ma[]   = { 256, 512, 704, 1024, 1536 };
+static const uint16_t k_chg_mv[]   = { 4096, 4208, 4288, 4352 };
+static const uint8_t  k_chg_tmax[] = { 40, 45, 50, 55, 0 };
+static constexpr int  kChgMaSafe = 2, kChgMvSafe = 2, kChgTmaxSafe = 1;   // the defaults' indexes
+static lv_obj_t* s_chg_rows[3] = { nullptr, nullptr, nullptr };
+static int s_chg_pend_kind = -1, s_chg_pend_idx = -1;   // the risky choice awaiting its confirm
+static int chgIndexOf(const uint16_t* v, int n, uint16_t x, int dflt) {
+  for (int i = 0; i < n; ++i) if (v[i] == x) return i;
+  return dflt;
+}
+static void chargeSettingsApply() {
+  board.setChargeLimits(touchPrefsGetChargeMa(), touchPrefsGetChargeMv());
+  board.setChargeTempMax((int16_t)touchPrefsGetChargeTmax() * 10);
+}
+static void chargeChoiceCommit(int kind, int i) {
+  if (kind == 0) touchPrefsSetChargeMa(k_chg_ma[i]);
+  if (kind == 1) touchPrefsSetChargeMv(k_chg_mv[i]);
+  if (kind == 2) touchPrefsSetChargeTmax(k_chg_tmax[i]);
+  chargeSettingsApply();
+  if (s_chg_rows[kind] && lv_obj_is_valid(s_chg_rows[kind])) setChoicePick(s_chg_rows[kind], i);
+}
+static void chargeChoiceConfirmed() {
+  if (s_chg_pend_kind >= 0) chargeChoiceCommit(s_chg_pend_kind, s_chg_pend_idx);
+  s_chg_pend_kind = s_chg_pend_idx = -1;
+}
+static void chargeChoiceCb(lv_event_t* e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  const int i = setChoiceIndex(e);
+  lv_obj_t* row = lv_obj_get_parent(lv_event_get_current_target(e));
+  const int kind = row == s_chg_rows[0] ? 0 : row == s_chg_rows[1] ? 1 : row == s_chg_rows[2] ? 2 : -1;
+  if (kind < 0 || i < 0) return;
+  const char* warn = nullptr;
+  if (kind == 0 && i > kChgMaSafe)
+    warn = TR("Charge faster than 750 mA?\nLilyGo advises against it for this battery: it heats the cell and "
+              "wears it out, and a damaged LiPo can swell or catch fire. Only where you can keep an eye on it.");
+  else if (kind == 1 && i > kChgMvSafe)
+    warn = TR("Charge to 4.35 V?\nOnly for high-voltage (LiHV) cells. It overcharges a normal LiPo, which can "
+              "then swell, fail or catch fire.");
+  else if (kind == 2 && k_chg_tmax[i] == 0)
+    warn = TR("Switch the temperature guard off?\nThe Pager then charges a hot or frozen battery. Charging below "
+              "0 \xC2\xB0" "C damages the cell inside and can cause a short later; charging it hot risks swelling and fire.");
+  else if (kind == 2 && k_chg_tmax[i] > 45)
+    warn = TR("Charge up to this temperature?\nAbove 45 \xC2\xB0" "C a LiPo wears out fast while charging, and "
+              "the risk of swelling or fire goes up.");
+  if (!warn) { chargeChoiceCommit(kind, i); return; }
+  s_chg_pend_kind = kind; s_chg_pend_idx = i;
+  showConfirm(warn, TR("Use anyway"), chargeChoiceConfirmed);
+}
+static void chargeDefaultsCb(lv_event_t* e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  chargeChoiceCommit(0, kChgMaSafe);
+  chargeChoiceCommit(1, kChgMvSafe);
+  chargeChoiceCommit(2, kChgTmaxSafe);
+  if (g_lv.task) g_lv.task->showAlert(TR("Charging back to the safe defaults"), 1500);
+}
+static void buildChargeCard() {
+  lv_obj_t* c = setCard("Charge limits");
+  setNote(c, "The defaults are the safe ones for this battery. Anything past them asks first.");
+  static const char* const ma_o[] = { "256 mA", "512 mA", "704 mA", "1024 mA", "1536 mA" };
+  s_chg_rows[0] = setChoiceRow(c, "Charge current", "Faster charging heats and wears the battery.",
+                               ma_o, 5, chgIndexOf(k_chg_ma, 5, touchPrefsGetChargeMa(), kChgMaSafe), chargeChoiceCb);
+  static const char* const mv_o[] = { "4.10 V", "4.21 V", "4.29 V", "4.35 V" };
+  s_chg_rows[1] = setChoiceRow(c, "Charge to", "Stopping lower gives a little less capacity and a longer battery life.",
+                               mv_o, 4, chgIndexOf(k_chg_mv, 4, touchPrefsGetChargeMv(), kChgMvSafe), chargeChoiceCb);
+  const char* t_o[] = { "40 \xC2\xB0" "C", "45 \xC2\xB0" "C", "50 \xC2\xB0" "C", "55 \xC2\xB0" "C", TR("Off") };
+  int ti = kChgTmaxSafe;
+  for (int i = 0; i < 5; ++i) if (k_chg_tmax[i] == touchPrefsGetChargeTmax()) ti = i;
+  s_chg_rows[2] = setChoiceRow(c, "Stop charging above", "Charging also stops below 0 \xC2\xB0" "C. It resumes 3 \xC2\xB0" "C back inside.",
+                               t_o, 5, ti, chargeChoiceCb);
+  setActionRow(c, LV_SYMBOL_REFRESH, "Back to safe defaults", nullptr, chargeDefaultsCb);
+}
+#endif
 static void buildBatteryPage() {
   {
     lv_obj_t* c = setCard("");
@@ -18837,6 +18914,9 @@ static void buildBatteryPage() {
     // The percentage is the fuel gauge's own state of charge, not a voltage curve:
     // nothing to calibrate (and "hold to reset" has no key equivalent here).
     setNote(c, "The percentage comes from the battery's fuel gauge, which learns the pack by itself.");
+  }
+  {
+    buildChargeCard();
 #else
     // Calibrate: the current voltage counts as 100% (packs whose full voltage is not
     // 4.2 V). Tap sets it; hold resets.
@@ -19279,9 +19359,17 @@ static void showConfirm(const char* msg, const char* ok_label, SimpleCb on_confi
   // the card can never overflow; the message area below scrolls if the cap bit.
   lv_obj_t* card = lv_obj_create(s_confirm_modal);
   lv_obj_remove_style_all(card);
-#if CAP_LARGE_SCREEN
+#if defined(TLORA_PAGER)
+  // The 210 px card left the 222 px tall panel room for three short lines, and the
+  // stacked buttons took the rest: a longer prompt was cut off. Most of the width
+  // instead, buttons side by side, so a few sentences fit.
+  const lv_coord_t cf_card_w = lv_disp_get_hor_res(nullptr) - 60;
+  const lv_coord_t cf_lblw = cf_card_w - PSC(12) * 2 - 40;   // clear of the X badge
+#elif CAP_LARGE_SCREEN
+  const lv_coord_t cf_card_w = PCW(210);
   const lv_coord_t cf_lblw = PSC(186 - 32);
 #else
+  const lv_coord_t cf_card_w = PCW(210);
   const lv_coord_t cf_lblw = 186 - 32;
 #endif
   // Portrait (or any card too narrow for both buttons side by side): stack them, OK
@@ -19290,10 +19378,15 @@ static void showConfirm(const char* msg, const char* ok_label, SimpleCb on_confi
   // stacked card also uses the smaller body font and leaves more room above the
   // buttons, so a multi-line prompt does not sit hard against them.
   const lv_coord_t cf_btn_gap = PSC(8);
+#if defined(TLORA_PAGER)
+  const bool cf_stack = false;
+  const lv_font_t* cf_font = &g_font_12;
+#else
   const bool cf_stack =
       lv_disp_get_ver_res(nullptr) > lv_disp_get_hor_res(nullptr) ||
       PSC(80) + SC(100) + cf_btn_gap > PCW(210) - PSC(12) * 2;
   const lv_font_t* cf_font = cf_stack ? &g_font_12 : &g_font_14;
+#endif
   const lv_coord_t cf_msg_gap = cf_stack ? PSC(22) : PSC(14);   // message -> buttons
   lv_point_t cf_tsz;
   lv_txt_get_size(&cf_tsz, TR(msg), cf_font, 0, 2, cf_lblw, LV_TEXT_FLAG_NONE);
@@ -19305,7 +19398,7 @@ static void showConfirm(const char* msg, const char* ok_label, SimpleCb on_confi
   if (cf_h > cf_max) cf_h = cf_max;
   lv_coord_t cf_msgh = (lv_coord_t)(cf_h - cf_chrome);
   if (cf_msgh < PSC(20)) cf_msgh = PSC(20);   // never let a tall UI scale invert this
-  lv_obj_set_size(card, PCW(210), cf_h);
+  lv_obj_set_size(card, cf_card_w, cf_h);
   lv_obj_align(card, LV_ALIGN_CENTER, 0, 0);
   styleSurface(card, COLOR_PANEL, 12);
   lv_obj_set_style_border_width(card, 1, LV_PART_MAIN);
@@ -19343,7 +19436,11 @@ static void showConfirm(const char* msg, const char* ok_label, SimpleCb on_confi
   s_confirm_msg_lbl = lbl;
 
   lv_obj_t* b_cancel = lv_btn_create(card);
+#if defined(TLORA_PAGER)
+  const lv_coord_t cf_cancel_w = 120;   // the 16 px text needs more than 80
+#else
   const lv_coord_t cf_cancel_w = cf_stack ? lv_pct(100) : PSC(80);
+#endif
   lv_obj_set_size(b_cancel, cf_cancel_w, PSC(34));
   lv_obj_align(b_cancel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
   styleButton(b_cancel);
@@ -19354,7 +19451,7 @@ static void showConfirm(const char* msg, const char* ok_label, SimpleCb on_confi
   lv_obj_t* lc = lv_label_create(b_cancel);
   useChainedFont(lc);
   lv_label_set_text(lc, TR("Cancel"));
-  uiFitLabelWidth(lc, (cf_stack ? PCW(210) - PSC(12) * 2 : PSC(80)) - 8);
+  uiFitLabelWidth(lc, (cf_stack ? cf_card_w - PSC(12) * 2 : cf_cancel_w) - 8);
   lv_obj_center(lc);
 
   lv_obj_t* b_ok = lv_btn_create(card);
@@ -19362,7 +19459,11 @@ static void showConfirm(const char* msg, const char* ok_label, SimpleCb on_confi
     lv_obj_set_size(b_ok, lv_pct(100), PSC(34));
     lv_obj_align(b_ok, LV_ALIGN_BOTTOM_LEFT, 0, -(PSC(34) + cf_btn_gap));   // directly above Cancel
   } else {
+#if defined(TLORA_PAGER)
+    lv_obj_set_size(b_ok, 160, SC(34));
+#else
     lv_obj_set_size(b_ok, SC(100), SC(34));
+#endif
     lv_obj_align(b_ok, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
   }
   styleButton(b_ok);
@@ -19370,7 +19471,7 @@ static void showConfirm(const char* msg, const char* ok_label, SimpleCb on_confi
   lv_obj_t* lo = lv_label_create(b_ok);
   useChainedFont(lo);
   lv_label_set_text(lo, ok_label ? TR(ok_label) : "OK");
-  uiFitLabelWidth(lo, (cf_stack ? PCW(210) - PSC(12) * 2 : SC(100)) - 8);
+  uiFitLabelWidth(lo, (cf_stack ? cf_card_w - PSC(12) * 2 : lv_obj_get_width(b_ok)) - 8);
   lv_obj_center(lo);
 #if CAP_KEYPAD_NAV
   if (focus_confirm || actions_only_nav) {
@@ -37188,7 +37289,14 @@ static void renderMapTiles() {
   // panned-in edges fill on release. >=4 MB boards keep the full grid + cushion.
   static const size_t kPsramTotalB = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
   const bool  kLowPsram   = (kPsramTotalB && kPsramTotalB < 4u * 1024 * 1024);
+#if defined(TLORA_PAGER)
+  // Only what the 480x222 panel shows: decoding the 256 px margin as well made
+  // every render half again as long (9 tiles instead of about 6). There is no
+  // touch drag here to pan an edge into view before the next render.
+  const int   tile_margin = 0;
+#else
   const int   tile_margin = kLowPsram ? 0 : 256;
+#endif
   const int   pool_cap    = kLowPsram ? 4 : k_map_visible_tiles_max;
   struct Wanted { int32_t tx; int32_t ty; bool placed; long d2; };
   Wanted wanted[k_map_visible_tiles_max];
@@ -37242,7 +37350,11 @@ static void renderMapTiles() {
   // fragmented PSRAM).
   for (int _ti = 0; _ti < k_map_visible_tiles_max; ++_ti) { MapTile& t = s_map_tiles[_ti];
     if (!t.in_use) continue;
+#if defined(TLORA_PAGER)
+    if (t.z != s_map_zoom) continue;   // kept (scaled) under the new tiles until pass 2 is done
+#else
     if (t.z != s_map_zoom) { releaseMapTileSlot(t); continue; }
+#endif
     bool kept = false;
     for (int i = 0; i < n_wanted; ++i) {
       if (!wanted[i].placed && wanted[i].tx == t.x && wanted[i].ty == t.y) {
@@ -37374,6 +37486,14 @@ static void renderMapTiles() {
     // each other (grid), so their relative order doesn't matter; what
     // matters is that ALL tiles stay below ALL markers.
     lv_obj_move_background(dst->img);
+#if defined(TLORA_PAGER)
+    // The previous zoom's tiles stay as a backdrop until this pass is done: sink
+    // them below the new tile, so it paints over them.
+    for (int _oi = 0; _oi < k_map_visible_tiles_max; ++_oi) {
+      MapTile& o = s_map_tiles[_oi];
+      if (o.in_use && o.img && o.z != s_map_zoom) lv_obj_move_background(o.img);
+    }
+#endif
     dst->in_use = true;
     wanted[i].placed = true;
     any_loaded = true;
@@ -37409,6 +37529,13 @@ static void renderMapTiles() {
     vTaskDelay(1);
   }
 
+#if defined(TLORA_PAGER)
+  // Pass 2 is done: drop the previous zoom's backdrop tiles.
+  for (int _ti = 0; _ti < k_map_visible_tiles_max; ++_ti) {
+    MapTile& t = s_map_tiles[_ti];
+    if (t.in_use && t.z != s_map_zoom) releaseMapTileSlot(t);
+  }
+#endif
   // Diagnostics: how many of the wanted tiles ended up with a live img widget
   // (kept from a prior pass OR freshly decoded). placed == want but a blank
   // screen ⇒ paint/z-order bug; placed < want ⇒ tiles missing from disk/decode.
@@ -39778,6 +39905,46 @@ static void mapZoomValFlash() {
   if (s_map_zoomval_hide) lv_timer_set_repeat_count(s_map_zoomval_hide, 1);
 }
 
+#if defined(TLORA_PAGER)
+// Zooming on the Pager: every detent used to run a full renderMapTiles() (SD read
+// + JPEG decode of every visible tile, with the old tiles thrown away first), so
+// turning the knob a few clicks stalled the UI for seconds and flashed black.
+// Now a step only scales the tiles already on screen around the centre (a live
+// preview of the new zoom), and the real render runs once the knob has rested.
+// renderMapTiles keeps those old tiles under the new ones until it has finished,
+// so the map never goes black in between (see its pass 1 / pass 2).
+static lv_timer_t* s_map_zoom_commit = nullptr;
+static void mapZoomPreview() {
+  const int cx = k_map_canvas_w / 2, cy = k_map_canvas_h / 2;
+  for (int i = 0; i < k_map_visible_tiles_max; ++i) {
+    MapTile& t = s_map_tiles[i];
+    if (!t.in_use || !t.img) continue;
+    const int d = (int)s_map_zoom - (int)t.z;
+    if (d > 2 || d < -2) { lv_obj_add_flag(t.img, LV_OBJ_FLAG_HIDDEN); continue; }   // too far off to help
+    const uint32_t zoom = d >= 0 ? (256u << d) : (256u >> -d);
+    lv_img_set_antialias(t.img, false);   // a preview: speed over smoothness
+    lv_img_set_pivot(t.img, (lv_coord_t)(cx - lv_obj_get_x(t.img)), (lv_coord_t)(cy - lv_obj_get_y(t.img)));
+    lv_img_set_zoom(t.img, (uint16_t)LV_MIN(zoom, 0xFFFFu));
+  }
+}
+static void mapZoomCommitCb(lv_timer_t*) {
+  s_map_zoom_commit = nullptr;
+#if defined(ESP32)
+  touchPrefsSetMapZoom(s_map_zoom);
+#endif
+  renderMapTiles();
+  renderMapMarkers();
+  refreshMapInfoLabel();
+}
+static void mapZoomDeferred() {
+  mapZoomPreview();
+  refreshMapInfoLabel();
+  if (s_map_zoom_commit) { lv_timer_reset(s_map_zoom_commit); return; }
+  s_map_zoom_commit = lv_timer_create(mapZoomCommitCb, 350, nullptr);
+  if (s_map_zoom_commit) lv_timer_set_repeat_count(s_map_zoom_commit, 1);
+  else mapZoomCommitCb(nullptr);
+}
+#endif
 static void mapZoomStep(bool zoom_in) {
   if (zoom_in  && s_map_zoom >= k_map_zoom_max) return;
   if (!zoom_in && s_map_zoom <= k_map_zoom_min) return;
@@ -39801,12 +39968,16 @@ static void mapZoomStep(bool zoom_in) {
   const uint8_t want = zoom_in ? (uint8_t)(s_map_zoom + 1) : (uint8_t)(s_map_zoom - 1);
 #endif
   s_map_zoom = want;
+#if defined(TLORA_PAGER)
+  mapZoomDeferred();   // preview now, render once the zooming stops
+#else
 #if defined(ESP32)
   touchPrefsSetMapZoom(s_map_zoom);   // persist like the slider does
 #endif
   renderMapTiles();
   renderMapMarkers();
   refreshMapInfoLabel();
+#endif
   if (s_map_zoom_buttons) mapZoomValFlash();   // slider mode already shows it permanently
 }
 static void mapZoomInCb(lv_event_t* e) {
@@ -39867,12 +40038,7 @@ static bool pagerMapZoomTurn(bool up) {
   if (s_map_zoom_val) lv_label_set_text_fmt(s_map_zoom_val, TR("zoom %d"), z);
   if ((uint8_t)z != s_map_zoom) {
     s_map_zoom = (uint8_t)z;
-#if defined(ESP32)
-    touchPrefsSetMapZoom(s_map_zoom);
-#endif
-    renderMapTiles();
-    renderMapMarkers();
-    refreshMapInfoLabel();
+    mapZoomDeferred();   // preview now, render once the knob rests
   }
   return true;
 }
@@ -67284,6 +67450,18 @@ static void buildThemeSettings() {
       s_tp.bg[i] = b;
       s_tp.bg_sw[i] = sw;
     }
+#if defined(TLORA_PAGER)
+    // The battery saver keeps a moving background still (its own help says so),
+    // which looked like Moving aurora not working. Say it where it is picked.
+    if (touchSleep::enabled()) {
+      lv_obj_t* n = lv_label_create(c);
+      lv_label_set_long_mode(n, LV_LABEL_LONG_WRAP);
+      lv_obj_set_width(n, cw);
+      lv_label_set_text(n, TR("Moving aurora stays still while Battery saver is on (Settings > Battery)."));
+      lv_obj_set_style_text_font(n, &g_font_12, LV_PART_MAIN);
+      lv_obj_set_style_text_color(n, lv_color_hex(COLOR_SUB), LV_PART_MAIN);
+    }
+#endif
     // The colour's own button, and the picture's (its file name), under the tiles.
     auto chip = [&](lv_event_cb_t cb, lv_obj_t** lbl, const char* text) {
       lv_obj_t* bt = lv_btn_create(c);
@@ -80697,6 +80875,10 @@ void UITask::loop() {
   }
 #endif
   {
+    // The stored charging limits (Settings > Battery > Charging), once, as soon as
+    // the loop runs: TLoraPagerBoard::begin() starts at the safe defaults.
+    static bool s_chg_applied = false;
+    if (!s_chg_applied) { s_chg_applied = true; chargeSettingsApply(); }
     // The charge temperature guard (TLoraPagerBoard::chargeThermalCheck) acts on
     // its own; tell the user when it pauses or resumes charging.
     static int s_chg_blk = 0;

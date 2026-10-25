@@ -279,19 +279,24 @@ void TLoraPagerBoard::refreshGauge() {
 // the gauge's reading decides: charging switches off outside the window and
 // back on 3 °C inside it, so it does not flap at the edge. The power path is
 // untouched: on USB the board keeps running from VBUS either way.
-#define PAGER_CHG_TEMP_MAX_C10   450
+// The upper limit can be changed (or the guard switched off) in Settings >
+// Battery > Charging, with a warning; the lower one is fixed.
 #define PAGER_CHG_TEMP_MIN_C10     0
 #define PAGER_CHG_TEMP_HYST_C10   30
 void TLoraPagerBoard::chargeThermalCheck(int16_t t) {
   if (!charger_ready_) return;
-  if (t < -400 || t > 1000) return;              // not a plausible reading: change nothing
   int8_t want = charge_temp_block_;
-  if (charge_temp_block_ == 0) {
-    if (t > PAGER_CHG_TEMP_MAX_C10)      want = 1;
-    else if (t < PAGER_CHG_TEMP_MIN_C10) want = -1;
-  } else if (t <= PAGER_CHG_TEMP_MAX_C10 - PAGER_CHG_TEMP_HYST_C10 &&
-             t >= PAGER_CHG_TEMP_MIN_C10 + PAGER_CHG_TEMP_HYST_C10) {
-    want = 0;
+  if (chg_tmax_c10_ <= 0) {
+    want = 0;                                    // guard off: charge whatever the temperature
+  } else {
+    if (t < -400 || t > 1000) return;            // not a plausible reading: change nothing
+    if (charge_temp_block_ == 0) {
+      if (t > chg_tmax_c10_)               want = 1;
+      else if (t < PAGER_CHG_TEMP_MIN_C10) want = -1;
+    } else if (t <= chg_tmax_c10_ - PAGER_CHG_TEMP_HYST_C10 &&
+               t >= PAGER_CHG_TEMP_MIN_C10 + PAGER_CHG_TEMP_HYST_C10) {
+      want = 0;
+    }
   }
   if (want == charge_temp_block_) return;
   charge_temp_block_ = want;
@@ -301,6 +306,22 @@ void TLoraPagerBoard::chargeThermalCheck(int16_t t) {
   Serial.printf("[POWER] charging %s (pack %d.%d C)\n",
                 want > 0 ? "paused, too hot" : want < 0 ? "paused, too cold" : "resumed",
                 t / 10, (t < 0 ? -t : t) % 10);
+}
+
+void TLoraPagerBoard::setChargeLimits(uint16_t ma, uint16_t mv) {
+  if (!charger_ready_) return;
+  ma = (uint16_t)(ma / 64 * 64);                 // the BQ25896's steps: 64 mA, 16 mV
+  mv = (uint16_t)(mv / 16 * 16);
+  if (ma < 64) ma = 64;
+  if (mv < 3840) mv = 3840;
+  s_charger.setChargerConstantCurr(ma);
+  s_charger.setChargeTargetVoltage(mv);
+  Serial.printf("[POWER] charge limits %u mA, %u mV\n", (unsigned)ma, (unsigned)mv);
+}
+
+void TLoraPagerBoard::setChargeTempMax(int16_t c10) {
+  chg_tmax_c10_ = c10 > 0 ? c10 : 0;
+  chargeThermalCheck(gauge_info_.valid ? gauge_info_.temp_c10 : (int16_t)250);   // re-decide now
 }
 
 // REG0B (system status): VBUS_STAT[7:5] (000 no input, 001 USB host, 010

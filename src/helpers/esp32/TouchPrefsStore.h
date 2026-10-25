@@ -620,6 +620,14 @@ bool    touchPrefsGetVibrate();               // Pager: vibrate for messages tha
 void    touchPrefsSetVibrate(bool on);
 bool    touchPrefsGetVibrateInput();          // Pager: a light click per key / knob detent (default false)
 void    touchPrefsSetVibrateInput(bool on);
+// Pager charging (Settings > Battery > Charging). Deliberately not in the backup:
+// a restore must never bring back a limit someone else chose to take a risk with.
+uint16_t touchPrefsGetChargeMa();            // fast-charge current, mA (default 704)
+void     touchPrefsSetChargeMa(uint16_t ma);
+uint16_t touchPrefsGetChargeMv();            // charge voltage, mV (default 4288)
+void     touchPrefsSetChargeMv(uint16_t mv);
+uint8_t  touchPrefsGetChargeTmax();          // stop charging above this, deg C; 0 = guard off (default 45)
+void     touchPrefsSetChargeTmax(uint8_t c);
 #endif
 bool    touchPrefsGetGlanceEnabled();          // master "at a glance" feature toggle (default true)
 void    touchPrefsSetGlanceEnabled(bool on);

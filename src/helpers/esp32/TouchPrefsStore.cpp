@@ -2499,6 +2499,12 @@ bool touchPrefsGetVibrate()             { if (!s_begun) touchPrefsBegin(); retur
 void touchPrefsSetVibrate(bool on)      { if (!s_begun) touchPrefsBegin(); prefsPutUChar("vib_on", on ? 1 : 0); }
 bool touchPrefsGetVibrateInput()        { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("vib_in", 0) != 0; }
 void touchPrefsSetVibrateInput(bool on) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("vib_in", on ? 1 : 0); }
+uint16_t touchPrefsGetChargeMa()        { if (!s_begun) touchPrefsBegin(); return s_prefs.getUShort("chg_ma", 704); }
+void     touchPrefsSetChargeMa(uint16_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUShort("chg_ma", v); }
+uint16_t touchPrefsGetChargeMv()        { if (!s_begun) touchPrefsBegin(); return s_prefs.getUShort("chg_mv", 4288); }
+void     touchPrefsSetChargeMv(uint16_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUShort("chg_mv", v); }
+uint8_t  touchPrefsGetChargeTmax()      { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("chg_tmax", 45); }
+void     touchPrefsSetChargeTmax(uint8_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("chg_tmax", v); }
 #endif
 bool touchPrefsGetGlanceEnabled()   { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("glance_en", 1) != 0; }
 void touchPrefsSetGlanceEnabled(bool on)    { if (!s_begun) touchPrefsBegin(); prefsPutUChar("glance_en", on ? 1 : 0); }
