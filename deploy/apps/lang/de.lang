@@ -1,7 +1,7 @@
 # wadamesh language file
 # canonical source - translators: edit this file and PR it
 # code: de
-# ver: 30
+# ver: 31
 # name: Deutsch
 # base: de
  (device behind)	 (Gerät geht nach)
@@ -1213,7 +1213,7 @@ Colour	Colour
 Connected. Start typing.	Connected. Start typing.
 Could not connect. Is the keyboard in pairing mode?	Could not connect. Is the keyboard in pairing mode?
 Disc.	Disc.
-Do Not Disturb is on	Do Not Disturb is on
+Do Not Disturb is on	Nicht stören ist an
 Esc always goes back. If your keyboard's Esc key types a character instead, tap the button, then press that key. Press Esc to undo.	Esc always goes back. If your keyboard's Esc key types a character instead, tap the button, then press that key. Press Esc to undo.
 Exact position to those contacts	Exact position to those contacts
 Forget	Forget
@@ -1247,7 +1247,7 @@ Requests left	Requests left
 Review run	Review run
 Run review	Run review
 Search again	Search again
-Sound is off	Sound is off
+Sound is off	Ton ist aus
 Start	Start
 Survey running	Survey running
 Survey stopped	Survey stopped
@@ -2236,3 +2236,60 @@ A click for each keypress and each turn of the knob.	Ein Klick bei jedem Tastend
 Stop charging below	Laden stoppen unter
 Never below freezing. It resumes 3 °C above the limit.	Nie unter dem Gefrierpunkt. Es geht 3 °C über der Grenze wieder los.
 It resumes 3 °C below the limit.	Es geht 3 °C unter der Grenze wieder los.
+Battery care	Akkuschonung
+Charge only to 80%	Laden nur bis 80%
+Stops charging at 80%, starts again below 75%. Kept off a full charge, the pack lasts noticeably longer; turn it off before a long day away from power.	Lädt bis 80%, weiter erst unter 75%. Nicht dauernd voll geladen hält der Akku deutlich länger; vor einem langen Tag ohne Steckdose ausschalten.
+Low battery warning	Warnung bei leerem Akku
+Warns with a vibration at 20%, again at 10%, and switches the Pager off at 3%, so the battery is never run flat.	Warnt mit Vibration bei 20%, nochmal bei 10%, und schaltet sich bei 3%, damit der Akku nie ganz leer wird, selbst aus.
+Shift + click: volume	Shift + Klick: Lautstärke
+Shift + click: brightness	Shift + Klick: Helligkeit
+Keys and shortcuts	Tasten und Kürzel
+Turn to scroll, click or any key to close.	Drehen zum Scrollen, Klick oder beliebige Taste schließt.
+Knob	Rad
+Move, click to select	Bewegen, Klick wählt aus
+Hold knob	Rad halten
+Fn + turn	Fn + drehen
+Next tab, or scroll inside a screen	Nächster Tab, oder in einem Fenster scrollen
+Shift + turn	Shift + drehen
+Screen brightness	Bildschirmhelligkeit
+Shift + click	Shift + Klick
+Switch the knob to volume	Rad auf Lautstärke umschalten
+Hold Shift	Shift halten
+Quiet now (Do Not Disturb) on / off	Jetzt ruhig (Nicht stören) ein / aus
+Hold Fn	Fn halten
+This help	Diese Hilfe
+Back (deletes while typing)	Zurück (löscht beim Tippen)
+Hold Backspace	Backspace halten
+Back from a text field; unlock	Zurück aus einem Textfeld; entsperren
+Hold Space	Leertaste halten
+Lock the screen	Bildschirm sperren
+Hold Enter	Enter halten
+More actions (like a long press)	Weitere Aktionen (wie langes Drücken)
+Tabs (Settings > Keyboard)	Tabs (Einstellungen > Tastatur)
+Hold H / Hold S	H halten / S halten
+Launcher options / Control panel	Launcher-Optionen / Kontrollzentrum
+Hold a letter	Buchstaben halten
+Accents and umlauts	Akzente und Umlaute
+Fn + Shift	Fn + Shift
+Caps Lock while typing	Feststelltaste beim Tippen
+Fn + Backspace	Fn + Backspace
+Fn + Enter	Fn + Enter
+Fn + click	Fn + Klick
+Special characters while typing	Sonderzeichen beim Tippen
+In a chat: jump to new messages	Im Chat: zu neuen Nachrichten springen
+W A S D,  Q / E	W A S D,  Q / E
+Pan the map; adjust a slider	Karte verschieben; Schieberegler stellen
+Quiet now: on (hold Shift again to end)	Jetzt ruhig: an (Shift erneut halten zum Beenden)
+Quiet now: off	Jetzt ruhig: aus
+Charging: switch-off cancelled	Lädt: Abschalten abgebrochen
+Battery empty: switching off in 10 s to protect it. Plug in to cancel.	Akku leer: Abschalten in 10 s zum Schutz. Anstecken bricht ab.
+Battery at %d%%: charge soon	Akku bei %d%%: bald laden
+Battery low: %d%%	Akku schwach: %d%%
+Battery care: kept at 80%, running from USB	Akkuschonung: hält 80%, läuft über USB
+not known	unbekannt
+Used today %d mAh · yesterday %s	Verbraucht heute %d mAh · gestern %s
+Kept at 80% (battery care)	Hält 80% (Akkuschonung)
+Quiet now	Jetzt ruhig
+Do Not Disturb until you switch it off. Holding Shift does the same from anywhere.	Nicht stören, bis du es ausschaltest. Shift halten macht dasselbe von überall.
+Quiet when face down	Ruhig, wenn umgedreht
+Lying face down, the screen goes off and the Pager stays silent (no sound, no vibration). Picking it up ends it. Keeps the motion sensor on, a little more power.	Mit dem Bildschirm nach unten geht er aus und der Pager bleibt still (kein Ton, keine Vibration). Aufheben beendet es. Hält den Bewegungssensor an, etwas mehr Stromverbrauch.
