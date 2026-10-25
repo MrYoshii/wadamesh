@@ -13179,10 +13179,15 @@ static bool dndActive() {
 
 #if defined(TLORA_PAGER)
 static void pagerFaceDownSettingChanged(bool on);
+static void pagerPickupSettingChanged(bool on);
 static void quietNowToggleCb(lv_event_t* e) {
   if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
   s_quiet_manual = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
   updateGlobalStatusBar();
+}
+static void pickupToggleCb(lv_event_t* e) {
+  if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
+  pagerPickupSettingChanged(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
 }
 static void faceDownToggleCb(lv_event_t* e) {
   if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
@@ -18279,6 +18284,11 @@ static void buildDisplayPage() {
     // The envelope LED: a flash on a new message, a soft breath while any are unread.
     setSwitchRow(c, "Message LED", "Flashes on a new message and breathes while any are unread.",
                  touchPrefsGetMsgLed(), msgLedToggleCb);
+#endif
+#if defined(TLORA_PAGER)
+    setSwitchRow(c, "Wake when picked up", "Lifting the Pager off the table turns the screen on (a locked Pager shows "
+                 "its lock screen). Only after it lay still, so it stays dark in a bag or pocket.",
+                 touchPrefsGetPickupWake(), pickupToggleCb);
 #endif
   }
 
@@ -48721,46 +48731,124 @@ static void pagerLowBatteryTick(uint32_t now) {
   else                          g_lv.task->showAlert(msg, 5000);
 }
 
-// ---- Face down = quiet (Pager, Settings > Sound, off by default) ---------------
-// Lying face down for 3 s: the screen goes off and the Pager is quiet (no sound,
-// no vibration, no glance), as Do Not Disturb. Picking it up ends it. Reads the
-// accelerometer once a second only while the setting is on (the first read after
-// a boot uploads the sensor hub's firmware, a second or two).
-static int8_t s_face_pref = -1;         // the setting, cached; -1 = not read yet
-static void pagerFaceDownTick(uint32_t now) {
+// ---- Motion: face down = quiet, pick up = wake (Pager) ---------------------------
+// Both off by default (Settings > Sound > Do Not Disturb; Settings > Display > Screen).
+// Face down: lying face down for 3 s turns the screen off and keeps the Pager
+// quiet (no sound, no vibration, no glance), as Do Not Disturb; picking it up
+// ends it. Pick up: lifting it off a table lights the screen (a locked Pager
+// only shows its lock screen). The accelerometer is read only while one of
+// them is on: once a second with the screen on, five times a second with it off
+// and pick-up on (a lift is over in half a second).
+//
+// Pick-up is meant not to go off in a bag or pocket. It only arms after the
+// Pager has lain still and flat (screen up or down, as on a table) for 3 s;
+// then it needs a real movement, and the Pager must come to rest within 2 s
+// in a reading position (screen facing up or towards you) tilted at least 20
+// degrees from how it lay. A bag that is carried never lies still enough to arm
+// it, and one that is picked up keeps swinging instead of settling. Waking it
+// that way disarms it until it has lain still again.
+static int8_t s_face_pref = -1;          // the face-down setting, cached; -1 = not read yet
+static int8_t s_pickup_pref = -1;        // the pick-up setting, likewise
+static void pagerMotionWarmup() {
+  // The first read of a boot uploads the sensor hub's firmware (1-2 s, the loop
+  // stands still meanwhile): say so before it happens, so it does not look hung.
+  if (pagerImuStarted()) return;
+  if (g_lv.task) g_lv.task->showAlert(TR("Starting the motion sensor\xE2\x80\xA6"), 2500);
+  lv_refr_now(nullptr);
+  float x, y, z;
+  pagerImuRead(&x, &y, &z);
+}
+static void pagerMotionTick(uint32_t now) {
   static uint32_t s_ms = 0, s_since = 0;
-  if (now - s_ms < 1000) return;
-  s_ms = now;
-  if (s_face_pref < 0) s_face_pref = touchPrefsGetFaceDownQuiet() ? 1 : 0;
-  if (!s_face_pref || now < 15000) {           // not in the first seconds after boot: let it settle
-    if (s_face_down) { s_face_down = false; updateGlobalStatusBar(); }
-    s_since = 0;
+  // Pick-up state.
+  static float    s_px = 0, s_py = 0, s_pz = 0;   // last sample
+  static bool     s_have_prev = false;
+  static uint32_t s_still_since = 0;             // when the readings stopped changing
+  static float    s_rx = 0, s_ry = 0, s_rz = 0;  // the pose it rested in
+  static bool     s_armed = false;               // lay still and flat long enough
+  static uint32_t s_moved_at = 0;                // a lift began, 0 = none under way
+  static uint32_t s_settle_since = 0;
+  if (s_face_pref < 0)   s_face_pref   = touchPrefsGetFaceDownQuiet() ? 1 : 0;
+  if (s_pickup_pref < 0) s_pickup_pref = touchPrefsGetPickupWake() ? 1 : 0;
+  const bool off = !g_lv.task || g_lv.task->isScreenOff();
+  const bool want_face = s_face_pref > 0;
+  const bool want_pick = s_pickup_pref > 0 && off;
+  if (!want_face && s_face_down) { s_face_down = false; updateGlobalStatusBar(); }
+  if ((!want_face && !want_pick) || now < 15000) {   // not in the first seconds after boot
+    s_since = 0; s_have_prev = false; s_armed = false; s_moved_at = 0; s_still_since = 0;
     return;
   }
+  if (now - s_ms < (want_pick ? 200u : 1000u)) return;
+  s_ms = now;
+  pagerMotionWarmup();
   float x, y, z;
   if (!pagerImuRead(&x, &y, &z)) return;
-  if (!s_face_down) {
-    if (z < -0.8f) {
-      if (!s_since) s_since = now;
-      else if (now - s_since >= 3000) {
-        s_face_down = true;
+
+  // ---- face down
+  if (want_face) {
+    if (!s_face_down) {
+      if (z < -0.8f) {
+        if (!s_since) s_since = now;
+        else if (now - s_since >= 3000) {
+          s_face_down = true;
+          s_since = 0;
+          Serial.printf("[MOTION] face down: quiet\n");
+          pagerHapticsClick(1);         // a light tick: noticed
+          if (g_lv.task && !g_lv.task->isScreenOff()) g_lv.task->sleepScreen();
+          updateGlobalStatusBar();
+        }
+      } else {
         s_since = 0;
-        pagerHapticsClick(1);           // a light tick: noticed
-        if (g_lv.task && !g_lv.task->isScreenOff()) g_lv.task->sleepScreen();
-        updateGlobalStatusBar();
       }
-    } else {
-      s_since = 0;
+    } else if (z > -0.5f) {
+      s_face_down = false;
+      updateGlobalStatusBar();
     }
-  } else if (z > -0.5f) {
-    s_face_down = false;
-    updateGlobalStatusBar();
   }
+
+  // ---- pick up (screen off only)
+  if (!want_pick) { s_have_prev = false; s_armed = false; s_moved_at = 0; s_still_since = 0; return; }
+  const float dx = x - s_px, dy = y - s_py, dz = z - s_pz;
+  const float d = s_have_prev ? sqrtf(dx * dx + dy * dy + dz * dz) : 1.0f;   // change since 200 ms ago, g
+  s_px = x; s_py = y; s_pz = z; s_have_prev = true;
+  const float mag = sqrtf(x * x + y * y + z * z);
+  const bool still = d < 0.03f && mag > 0.9f && mag < 1.1f;
+  if (still) { if (!s_still_since) s_still_since = now; }
+  else       s_still_since = 0;
+
+  if (!s_moved_at) {
+    if (s_still_since && now - s_still_since >= 3000 && fabsf(z) > 0.85f) {   // flat on a table
+      s_armed = true;
+      s_rx = x; s_ry = y; s_rz = z;
+    }
+    if (s_armed && d > 0.08f) { s_moved_at = now; s_settle_since = 0; }
+    return;
+  }
+  // A lift is under way: does it end in a reading position within 2 s?
+  if (now - s_moved_at > 2000) { s_moved_at = 0; s_armed = false; return; }   // kept moving: a bag
+  if (d < 0.05f && mag > 0.85f && mag < 1.15f) { if (!s_settle_since) s_settle_since = now; }
+  else s_settle_since = 0;
+  if (!s_settle_since || now - s_settle_since < 400) return;
+  const float cosang = (x * s_rx + y * s_ry + z * s_rz) / (mag * sqrtf(s_rx * s_rx + s_ry * s_ry + s_rz * s_rz));
+  const bool reading_pose = z / mag > 0.3f;          // screen up or towards you
+  s_moved_at = 0;
+  s_armed = false;                                  // until it has lain still again
+  if (!reading_pose || cosang > 0.94f) return;      // put back down, or barely tilted
+  if (!g_lv.task || !g_lv.task->isScreenOff()) return;
+  Serial.printf("[MOTION] picked up: screen on\n");
+  if (g_lv.task->isManualLock()) g_lv.task->lockscreenReveal();
+  else                           g_lv.task->wakeScreen();
 }
 static void pagerFaceDownSettingChanged(bool on) {
   touchPrefsSetFaceDownQuiet(on);
   s_face_pref = on ? 1 : 0;
+  if (on) pagerMotionWarmup();
   if (!on && s_face_down) { s_face_down = false; updateGlobalStatusBar(); }
+}
+static void pagerPickupSettingChanged(bool on) {
+  touchPrefsSetPickupWake(on);
+  s_pickup_pref = on ? 1 : 0;
+  if (on) pagerMotionWarmup();
 }
 #endif
 
@@ -81431,7 +81519,7 @@ void UITask::loop() {
   }
   if (_screen_off && s_keyhelp) pagerKeyHelpClose();
   pagerLowBatteryTick(now);
-  pagerFaceDownTick(now);
+  pagerMotionTick(now);
 #endif
 #elif defined(HAS_M9_KEYBOARD)
   // Own the stall buckets for everything a keypress triggers. The "ui:input"

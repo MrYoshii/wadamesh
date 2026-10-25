@@ -26,4 +26,8 @@ bool pagerImuRead(float* x_g, float* y_g, float* z_g);
  *  seconds after the last read, so the hub idles while no app wants tilt. */
 void pagerImuIdleTick();
 
+/** True once the hub firmware upload has been tried this boot, i.e. the next
+ *  pagerImuRead() will not block for it. */
+bool pagerImuStarted();
+
 #endif

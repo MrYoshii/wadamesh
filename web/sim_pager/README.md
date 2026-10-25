@@ -38,7 +38,8 @@ screen. Alt/Fn chords are not simulated.
 
 `WADA_SIM_SOC=N` sets the gauge's percentage (`WADA_SIM_SOC_DROP=1` lets it fall
 1 % per 5 s), `WADA_SIM_CARE_HOLD=1` fakes battery care holding at 80 % on USB,
-`WADA_SIM_FACEDOWN=1` lays the Pager face down.
+`WADA_SIM_FACEDOWN=1` lays the Pager face down, `WADA_SIM_PICKUP=MS` lifts it MS after
+start, `WADA_SIM_BAG=1` carries it in a swinging bag.
 
 `WADA_SIM_CHARGING=1` in the environment fakes USB charging at about 480 mA
 (charge icon, gauge lines, the screensaver while idle).

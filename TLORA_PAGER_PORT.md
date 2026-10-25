@@ -84,7 +84,14 @@ Battery care and quiet modes (all Pager-only, gated `TLORA_PAGER`):
 - **Quiet when face down** (Settings > Sound > Do Not Disturb, default off):
   accelerometer read once a second while on; z below -0.8 g for 3 s = screen off
   and DND, z above -0.5 g ends it. **Still to confirm on hardware**: the sign of
-  z when face down.
+  z when face down (confirmed 2026-10-25: works).
+- **Wake when picked up** (Settings > Display > Screen, default off): with the
+  screen off the accelerometer is read every 200 ms; it arms only after lying
+  still and flat (|z| > 0.85 g) for 3 s, then needs a movement that settles
+  within 2 s in a reading pose (z > 0.3 g) tilted > 20 degrees from the rest
+  pose. Carried bags never arm it; a swinging bag never settles. Locked: shows
+  the lock screen only. Turning either motion setting on shows "Starting the
+  motion sensor..." before the 1-2 s hub firmware upload.
 
 Power: with the screen dark and no app connected, a joined Wi-Fi drops to
 maximum modem sleep (`esp_wifi_set_ps(WIFI_PS_MAX_MODEM)`, `pagerWifiPsUpdate()`),

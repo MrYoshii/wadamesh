@@ -78,6 +78,8 @@ bool pagerImuRead(float* x_g, float* y_g, float* z_g) {
   return true;
 }
 
+bool pagerImuStarted() { return s_tried; }
+
 void pagerImuIdleTick() {
   if (!s_sampling) return;
   if (millis() - s_last_read_ms < PAGER_IMU_IDLE_MS) return;
