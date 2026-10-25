@@ -49570,10 +49570,19 @@ static void lockscreenShow() {
   lv_obj_set_flex_align(s_lock_batt, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_column(s_lock_batt, SC(4), LV_PART_MAIN);
 #if defined(TLORA_PAGER)
+  // On the Pager the row carries the gauge line too, and faint text straight on a
+  // bright wallpaper was hard to read: give it the same pill as the message chips
+  // below (card fill, border, round ends) and the brighter secondary text.
+  lv_obj_set_style_radius(s_lock_batt, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(s_lock_batt, lv_color_hex(k.card), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(s_lock_batt, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_color(s_lock_batt, lv_color_hex(k.border), LV_PART_MAIN);
+  lv_obj_set_style_border_width(s_lock_batt, 1, LV_PART_MAIN);
+  lv_obj_set_style_pad_hor(s_lock_batt, SC(8), LV_PART_MAIN);
   s_lock_batt_gauge = lv_label_create(s_lock_batt);
   lv_label_set_text(s_lock_batt_gauge, "");
   lv_obj_set_style_text_font(s_lock_batt_gauge, &g_font_12, LV_PART_MAIN);
-  lv_obj_set_style_text_color(s_lock_batt_gauge, lv_color_hex(k.ter), LV_PART_MAIN);
+  lv_obj_set_style_text_color(s_lock_batt_gauge, lv_color_hex(k.sub), LV_PART_MAIN);
   lv_obj_set_style_pad_right(s_lock_batt_gauge, SC(2), LV_PART_MAIN);
 #endif
   s_lock_batt_chg = lv_label_create(s_lock_batt);
@@ -49583,7 +49592,11 @@ static void lockscreenShow() {
   s_lock_batt_lbl = lv_label_create(s_lock_batt);
   lv_label_set_text(s_lock_batt_lbl, "");
   lv_obj_set_style_text_font(s_lock_batt_lbl, fhint, LV_PART_MAIN);
+#if defined(TLORA_PAGER)
+  lv_obj_set_style_text_color(s_lock_batt_lbl, lv_color_hex(k.text), LV_PART_MAIN);   // on the pill
+#else
   lv_obj_set_style_text_color(s_lock_batt_lbl, lv_color_hex(k.ter), LV_PART_MAIN);
+#endif
   s_lock_batt_icon = lv_obj_create(s_lock_batt);
   lv_obj_remove_style_all(s_lock_batt_icon);
   lv_obj_clear_flag(s_lock_batt_icon, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
@@ -49595,7 +49608,7 @@ static void lockscreenShow() {
 #if defined(TLORA_PAGER)
     {
       const char* w = TR("%d mA \xC2\xB7 %u:%02u to full");   // the widest gauge line, roughly
-      batt_w += (lv_coord_t)(lv_txt_get_width(w, strlen(w), &g_font_12, 0, LV_TEXT_FLAG_NONE) + SC(6));
+      batt_w += (lv_coord_t)(lv_txt_get_width(w, strlen(w), &g_font_12, 0, LV_TEXT_FLAG_NONE) + SC(6) + 2 * SC(8));   // + pill padding
     }
 #endif
     // A few pixels of overlap move the hint left instead (unseen); more than
