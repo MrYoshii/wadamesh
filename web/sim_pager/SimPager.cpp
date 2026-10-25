@@ -56,15 +56,19 @@ int pagerKeyboardReadKey() {
   return k;
 }
 void pagerKeyboardSetBacklight(uint8_t) {}
-bool pagerKeyboardAltHeld() { return false; }
+static uint32_t s_shift_until = 0, s_fn_until = 0;   // "holdkey shift MS" / "holdkey fn MS"
+bool pagerKeyboardAltHeld() { return s_fn_until && (int32_t)(millis() - s_fn_until) < 0; }
 void pagerKeyboardMarkAltUsed() {}
 void pagerKeyboardDiscardAlt() {}
 bool pagerKeyboardBackspaceHeld() { return false; }
 static uint32_t s_space_until = 0;   // "holdkey space MS": the bar held, nothing typed
 bool pagerKeyboardSpaceHeld() { return s_space_until && (int32_t)(millis() - s_space_until) < 0; }
 bool pagerKeyboardLetterHeld() { return s_letter_until && (int32_t)(millis() - s_letter_until) < 0; }
+bool pagerKeyboardShiftHeld() { return s_shift_until && (int32_t)(millis() - s_shift_until) < 0; }
 void simPagerHoldKey(uint8_t c, uint32_t ms) {   // script: type c and hold its key for ms
   if (c == ' ') { s_space_until = millis() + ms; return; }
+  if (c == 0x01) { s_shift_until = millis() + ms; return; }
+  if (c == 0x02) { s_fn_until = millis() + ms; return; }
   const uint8_t next = (uint8_t)((s_head + 1) & 63u);
   if (next != s_tail) { s_ring[s_head] = c; s_head = next; }
   s_letter_until = millis() + ms;

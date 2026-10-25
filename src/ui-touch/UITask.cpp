@@ -13153,7 +13153,18 @@ static void toggleGpsCb(lv_event_t* e) {   // GPS on/off switch (VALUE_CHANGED)
 // start/end window (30-min slots, may wrap past midnight). Unconditional (not
 // board-gated) so both the sound chokepoint and the status-bar icon code can call
 // it on every board. Silently inactive if the RTC hasn't been set yet.
+#if defined(TLORA_PAGER)
+// Two more ways to be quiet on the Pager, on top of the timed window: "Quiet now"
+// (hold Shift: on until held again, not kept over a restart) and lying face down
+// (Settings > Sound, off by default). Either one counts as Do Not Disturb.
+static bool s_quiet_manual = false;
+static bool s_face_down    = false;
+static uint32_t s_pager_input_seq = 0;   // moves on with every key, chord, turn and click
+#endif
 static bool dndActive() {
+#if defined(TLORA_PAGER)
+  if (s_quiet_manual || s_face_down) return true;
+#endif
   if (!touchPrefsGetDndEnabled()) return false;
   if (!wallClockIsCurrent()) return false;
   time_t now_t = time(nullptr);
@@ -13166,6 +13177,18 @@ static bool dndActive() {
   return (start <= end) ? (t >= start && t < end) : (t >= start || t < end);
 }
 
+#if defined(TLORA_PAGER)
+static void pagerFaceDownSettingChanged(bool on);
+static void quietNowToggleCb(lv_event_t* e) {
+  if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
+  s_quiet_manual = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+  updateGlobalStatusBar();
+}
+static void faceDownToggleCb(lv_event_t* e) {
+  if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
+  pagerFaceDownSettingChanged(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+#endif
 // Do Not Disturb master switch (under the Sound settings section). Stays silent
 // on toggle (no preview chime) since the whole point of DND is not making noise.
 static void toggleDndCb(lv_event_t* e) {
@@ -18689,6 +18712,13 @@ static void buildSoundPage() {
     dndStartLabelRefresh();
     s_dnd_end_lbl = setStepperRow(c, "Until", nullptr, "-30m", "+30m", dndEndMinusCb, dndEndPlusCb, nullptr, nullptr);
     dndEndLabelRefresh();
+#if defined(TLORA_PAGER)
+    setSwitchRow(c, "Quiet now", "Do Not Disturb until you switch it off. Holding Shift does the same from anywhere.",
+                 s_quiet_manual, quietNowToggleCb);
+    setSwitchRow(c, "Quiet when face down", "Lying face down, the screen goes off and the Pager stays silent "
+                 "(no sound, no vibration). Picking it up ends it. Keeps the motion sensor on, a little more power.",
+                 touchPrefsGetFaceDownQuiet(), faceDownToggleCb);
+#endif
   }
 #else
   {
@@ -18861,6 +18891,7 @@ static void chargeSettingsApply() {
   board.setChargeLimits(touchPrefsGetChargeMa(), touchPrefsGetChargeMv());
   board.setChargeTempMax((int16_t)touchPrefsGetChargeTmax() * 10);
   board.setChargeTempMin((int16_t)touchPrefsGetChargeTmin() * 10);
+  board.setChargeCare(touchPrefsGetChargeCare());
 }
 static void chargeChoiceCommit(int kind, int i) {
   if (kind == 0) touchPrefsSetChargeMa(k_chg_ma[i]);
@@ -18906,6 +18937,25 @@ static void chargeDefaultsCb(lv_event_t* e) {
   chargeChoiceCommit(3, 0);
   if (g_lv.task) g_lv.task->showAlert(TR("Charging back to the safe defaults"), 1500);
 }
+// Battery care and the low-battery guard (Pager). Both switches act at once.
+static void chargeCareToggleCb(lv_event_t* e) {
+  if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
+  const bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+  touchPrefsSetChargeCare(on);
+  board.setChargeCare(on);
+}
+static void lowBattToggleCb(lv_event_t* e) {
+  if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
+  touchPrefsSetLowBattWarn(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+static void buildCareCard() {
+  lv_obj_t* c = setCard("Battery care");
+  setSwitchRow(c, "Charge only to 80%", "Stops charging at 80%, starts again below 75%. Kept off a full charge, the pack "
+               "lasts noticeably longer; turn it off before a long day away from power.",
+               touchPrefsGetChargeCare(), chargeCareToggleCb);
+  setSwitchRow(c, "Low battery warning", "Warns with a vibration at 20%, again at 10%, and switches the Pager off "
+               "at 3%, so the battery is never run flat.", touchPrefsGetLowBattWarn(), lowBattToggleCb);
+}
 static void buildChargeCard() {
   lv_obj_t* c = setCard("Charge limits");
   setNote(c, "The defaults are the safe ones for this battery. Anything past them asks first.");
@@ -18950,6 +19000,7 @@ static void buildBatteryPage() {
     setNote(c, "The percentage comes from the battery's fuel gauge, which learns the pack by itself.");
   }
   {
+    buildCareCard();
     buildChargeCard();
 #else
     // Calibrate: the current voltage counts as 100% (packs whose full voltage is not
@@ -24761,6 +24812,66 @@ static void batteryLogAppend(uint32_t epoch, uint16_t mv, int pct, uint16_t cpu_
 // Called every UITask::loop tick; rate-limited to k_batt_log_period_ms. No new
 // timer: the UI loop already runs continuously on this always-on device. The
 // first sample waits half a minute, clear of the boot's own work.
+#if defined(TLORA_PAGER)
+// ---- What the pack gave, per day (Pager) ----------------------------------------
+// The gauge's current, integrated over the 10 s samples below: mAh drawn from the
+// battery today (local midnight to now) and over the whole of yesterday. Charging
+// does not count against it. Saved with each log line, so a restart keeps it;
+// "yesterday" is unknown (shown as such) when the Pager was off across midnight
+// or the clock was not set.
+static uint32_t s_bday_key = 0;          // local YYYYMMDD the counts belong to, 0 = no clock yet
+static float    s_bday_today = 0.0f;     // mAh
+static int32_t  s_bday_yday = -1;        // mAh, -1 = not known
+static bool     s_bday_loaded = false;
+static uint16_t s_bday_saved = 0xFFFF;   // today's whole mAh as last written
+static uint32_t battDayKeyOf(time_t t) {
+  struct tm tm_loc; localtime_r(&t, &tm_loc);
+  return (uint32_t)((tm_loc.tm_year + 1900) * 10000 + (tm_loc.tm_mon + 1) * 100 + tm_loc.tm_mday);
+}
+static uint32_t battDayKeyNow() {
+  if (!wallClockIsCurrent()) return 0;
+  const time_t t = time(nullptr);
+  return t > 1700000000 ? battDayKeyOf(t) : 0;
+}
+static void battDaySave() {
+  const uint16_t td = (uint16_t)(s_bday_today > 65000.0f ? 65000 : (int)s_bday_today);
+  const uint16_t yd = s_bday_yday < 0 ? 0xFFFF : (uint16_t)(s_bday_yday > 65000 ? 65000 : s_bday_yday);
+  touchPrefsSetBattDayMah((uint32_t)yd << 16 | td);
+  s_bday_saved = td;
+}
+static void battDayTick(int16_t current_ma, uint32_t dt_ms) {
+  if (!s_bday_loaded) {
+    s_bday_loaded = true;
+    s_bday_key = touchPrefsGetBattDayKey();
+    const uint32_t v = touchPrefsGetBattDayMah();
+    s_bday_today = (float)(v & 0xFFFF);
+    if ((v & 0xFFFF) == 0xFFFF) s_bday_today = 0.0f;
+    s_bday_yday = (v >> 16) == 0xFFFF ? -1 : (int32_t)(v >> 16);
+    s_bday_saved = (uint16_t)s_bday_today;
+  }
+  const uint32_t key = battDayKeyNow();
+  if (key && key != s_bday_key) {
+    if (s_bday_key) {
+      // The day after the stored one? Then its count is yesterday's; otherwise the
+      // Pager was off over at least one midnight and yesterday is unknown.
+      struct tm d = {};
+      d.tm_year = (int)(s_bday_key / 10000) - 1900;
+      d.tm_mon  = (int)(s_bday_key / 100 % 100) - 1;
+      d.tm_mday = (int)(s_bday_key % 100) + 1;
+      d.tm_hour = 12;
+      const time_t next = mktime(&d);
+      s_bday_yday = (next != (time_t)-1 && battDayKeyOf(next) == key) ? (int32_t)s_bday_today : -1;
+      s_bday_today = 0.0f;
+    }
+    // (s_bday_key 0: counted before the clock was set, all of it today's.)
+    s_bday_key = key;
+    touchPrefsSetBattDayKey(key);
+    battDaySave();
+  }
+  if (current_ma < 0 && dt_ms > 0 && dt_ms < 120000u)   // a gap (deep sleep, a stall) is not guessed at
+    s_bday_today += (float)(-current_ma) * (float)dt_ms / 3600000.0f;
+}
+#endif
 static void batteryLogTick(uint32_t now_ms) {
   static uint32_t s_next_ms = 0;
 #if defined(TLORA_PAGER)
@@ -24771,9 +24882,10 @@ static void batteryLogTick(uint32_t now_ms) {
   static int32_t  s_ma_sum = 0;
   static uint16_t s_ma_n = 0;
   if (!s_ma_ms || now_ms - s_ma_ms >= 10000u) {
+    const uint32_t dt = s_ma_ms ? now_ms - s_ma_ms : 0;
     s_ma_ms = now_ms ? now_ms : 1;
     const TLoraPagerBoard::GaugeInfo g = board.getGaugeInfo();
-    if (g.valid) { s_ma_sum += g.current_ma; ++s_ma_n; }
+    if (g.valid) { s_ma_sum += g.current_ma; ++s_ma_n; battDayTick(g.current_ma, dt); }
   }
 #endif
   if (s_next_ms == 0) { s_next_ms = now_ms + 30000u; return; }
@@ -24785,6 +24897,7 @@ static void batteryLogTick(uint32_t now_ms) {
   const bool has_ma = s_ma_n > 0;
   const int ma = has_ma ? (int)(s_ma_sum / (int32_t)s_ma_n) : 0;
   s_ma_sum = 0; s_ma_n = 0;
+  if ((uint16_t)s_bday_today != s_bday_saved) battDaySave();   // at most once per log line
   batteryLogAppend((uint32_t)time(nullptr), mv, batteryPercentFromMv(mv),
                    (uint16_t)getCpuFrequencyMhz(), has_ma, ma);
 #else
@@ -24800,6 +24913,7 @@ static void batteryLogTick(uint32_t now_ms) {
 static lv_obj_t*   s_bg_now  = nullptr;   // "-42 mA · 152 mW"
 static lv_obj_t*   s_bg_cap  = nullptr;   // "1131 / 1488 mAh · 26 h 55 min left"
 static lv_obj_t*   s_bg_misc = nullptr;   // "24.1 °C · 12 cycles · health 99 %"
+static lv_obj_t*   s_bg_day  = nullptr;   // "Today 212 mAh · yesterday 1034 mAh"
 static lv_timer_t* s_bg_timer = nullptr;
 static void fmtMinutes(char* out, size_t cap, uint16_t mins) {
   if (mins >= 60) snprintf(out, cap, "%u h %02u min", (unsigned)(mins / 60), (unsigned)(mins % 60));
@@ -24823,6 +24937,10 @@ static void batteryGaugeRefresh() {
              (int)(g.temp_c10 / 10));
     lv_label_set_text(s_bg_now, a);
     lv_obj_set_style_text_color(s_bg_now, lv_color_hex(COLOR_STATUS_WARN_TEXT), LV_PART_MAIN);
+  } else if (board.chargeCareHold() && board.externalPowerPresent() == 1 && !charging) {
+    // Battery care holds the pack at 80 %: running from USB, not charging.
+    lv_label_set_text(s_bg_now, TR("Battery care: kept at 80%, running from USB"));
+    lv_obj_set_style_text_color(s_bg_now, lv_color_hex(COLOR_STATUS_OK), LV_PART_MAIN);
   } else {
   snprintf(a, sizeof a, charging ? TR("Charging %d mA \xC2\xB7 %d mW") : TR("Drawing %d mA \xC2\xB7 %d mW"),
            (int)(g.current_ma < 0 ? -g.current_ma : g.current_ma), (int)(g.power_mw < 0 ? -g.power_mw : g.power_mw));
@@ -24843,13 +24961,20 @@ static void batteryGaugeRefresh() {
            (int)(g.temp_c10 / 10), (int)((g.temp_c10 < 0 ? -g.temp_c10 : g.temp_c10) % 10),
            (unsigned)g.cycles, (unsigned)g.health_pct);
   lv_label_set_text(s_bg_misc, c);
+  if (s_bg_day && lv_obj_is_valid(s_bg_day)) {
+    char y[24];
+    if (s_bday_yday >= 0) snprintf(y, sizeof y, "%d mAh", (int)s_bday_yday);
+    else                  snprintf(y, sizeof y, "%s", TR("not known"));
+    snprintf(b, sizeof b, TR("Used today %d mAh \xC2\xB7 yesterday %s"), (int)s_bday_today, y);
+    lv_label_set_text(s_bg_day, b);
+  }
 }
 static void batteryGaugeTimerCb(lv_timer_t*) { batteryGaugeRefresh(); }
 static void batteryGaugeStop() {
   if (s_bg_timer) { lv_timer_del(s_bg_timer); s_bg_timer = nullptr; }
-  s_bg_now = s_bg_cap = s_bg_misc = nullptr;
+  s_bg_now = s_bg_cap = s_bg_misc = s_bg_day = nullptr;
 }
-// The three gauge lines from (0, y) in the card; returns the height they take.
+// The four gauge lines from (0, y) in the card; returns the height they take.
 static int batteryGaugeBlock(lv_obj_t* card, int y, lv_coord_t w) {
   batteryGaugeStop();
   const int lh14 = (int)lv_font_get_line_height(&g_font_14) + 2;
@@ -24867,9 +24992,10 @@ static int batteryGaugeBlock(lv_obj_t* card, int y, lv_coord_t w) {
   s_bg_now  = mk(&g_font_14, COLOR_ACCENT, y);
   s_bg_cap  = mk(&g_font_12, COLOR_TEXT, y + lh14);
   s_bg_misc = mk(&g_font_12, COLOR_SUB, y + lh14 + lh12);
+  s_bg_day  = mk(&g_font_12, COLOR_SUB, y + lh14 + 2 * lh12);
   batteryGaugeRefresh();
   s_bg_timer = lv_timer_create(batteryGaugeTimerCb, 2000, nullptr);   // the gauge refreshes every 2 s
-  return lh14 + 2 * lh12 + 4;
+  return lh14 + 3 * lh12 + 4;
 }
 #endif
 static void batteryChartClose() {
@@ -47892,6 +48018,9 @@ static void updatePagerBackspaceHold(unsigned long now) {
 // surprising/purposeless before this split).
 static void updatePagerAltShiftChord() {
   if (!pagerKeyboardConsumeAltShiftChord()) return;
+#if defined(TLORA_PAGER)
+  s_pager_input_seq++;   // a chord: Fn or Shift was a modifier, not a hold
+#endif
   lv_obj_t* ta_focused = lv_keyboard_get_textarea(g_lv.keyboard);
   lv_obj_t* ta = (ta_focused && s_nav_group && lv_group_get_focused(s_nav_group) == ta_focused) ? ta_focused : nullptr;
   if (!ta) return;
@@ -47938,6 +48067,9 @@ static void updateProAltBChord() {
 // Enter is the one key with no symbol on it, so the chord costs nothing.
 static void updatePagerAltEnterChord() {
   if (!pagerKeyboardConsumeAltEnterChord()) return;
+#if defined(TLORA_PAGER)
+  s_pager_input_seq++;   // a chord: Fn or Shift was a modifier, not a hold
+#endif
   lv_obj_t* ta_focused = lv_keyboard_get_textarea(g_lv.keyboard);
   lv_obj_t* ta = (ta_focused && s_nav_group && lv_group_get_focused(s_nav_group) == ta_focused) ? ta_focused : nullptr;
   if (!ta || !lv_obj_is_valid(ta)) return;
@@ -47952,6 +48084,9 @@ static void updatePagerAltEnterChord() {
 #endif
 static void updatePagerAltBackspaceChord() {
   if (!pagerKeyboardConsumeAltBackspaceChord()) return;
+#if defined(TLORA_PAGER)
+  s_pager_input_seq++;   // a chord: Fn or Shift was a modifier, not a hold
+#endif
   // The accent/@-mention pickers live on lv_layer_top(), outside the tab
   // content navGoToMainTab() switches away from -- close them explicitly
   // first so a stray overlay doesn't keep floating over the Home screen.
@@ -48517,6 +48652,362 @@ static bool pagerSliderEditClick() {
   return true;
 }
 
+#if defined(TLORA_PAGER)
+// ---- Low battery (Pager) --------------------------------------------------------
+// On battery only, with Settings > Battery > Low battery warning on (the default):
+// a warning with a vibration at 20 % and again at 10 %, and at 3 % the Pager
+// switches itself off (ship mode, see powerOffNow) before the cell is run flat; a
+// LiPo left empty for long can be damaged for good. The percentage is the fuel
+// gauge's. Each warning comes once per discharge: plugging in (or the pack coming
+// back 5 % above it) arms it again. A warning given while the screen is off is
+// shown when it next comes on.
+#if defined(PIN_USER_BTN) && !defined(HAS_WIO_TRACKER_L2) && !defined(HAS_TDISPLAY_P4) && !defined(HAS_SENSECAP_INDICATOR)
+static void powerOffNow();
+#define PAGER_HAS_POWER_OFF 1
+#endif
+static void pagerLowBatteryTick(uint32_t now) {
+  static uint32_t s_ms = 0;
+  static int      s_warned = 101;       // the lowest level already warned about this discharge
+  static uint8_t  s_low_reads = 0;      // consecutive readings at or under the switch-off level
+  static uint32_t s_off_at = 0;         // when the switch-off goes ahead, 0 = not counting down
+  static const char* s_pending = nullptr;   // a warning still to show once the screen is on
+  if (s_pending && g_lv.task && !g_lv.task->isScreenOff()) { g_lv.task->showAlert(s_pending, 5000); s_pending = nullptr; }
+  if (now < 20000 || now - s_ms < 2000) return;   // let the boot and the gauge settle first
+  s_ms = now;
+  if (!g_lv.task) return;
+  const int soc = board.getBattStateOfCharge();
+  const bool on_usb = board.externalPowerPresent() != 0;   // 1 = USB, -1 = charger silent: do nothing
+  if (on_usb || soc < 0 || soc > 100 || !touchPrefsGetLowBattWarn()) {
+    if (s_off_at) { s_off_at = 0; if (on_usb) g_lv.task->showAlert(TR("Charging: switch-off cancelled"), 2500); }
+    if (on_usb) s_warned = 101;
+    s_low_reads = 0;
+    return;
+  }
+  if (soc >= s_warned + 5) s_warned = 101;          // charged back up a fair way
+  const bool vib_ok = touchPrefsGetVibrate() && !dndActive();
+  if (soc <= 3) {
+    if (++s_low_reads < 3) return;                  // 3 readings in a row (6 s): not a glitch
+    if (!s_off_at) {
+      s_off_at = now + 10000;
+      pagerHapticsPattern(PAGER_VIB_LONG, 2);
+      if (g_lv.task->isManualLock()) g_lv.task->lockscreenReveal();
+      else                           g_lv.task->wakeScreen();
+      g_lv.task->showAlert(TR("Battery empty: switching off in 10 s to protect it. Plug in to cancel."), 9500);
+    } else if ((int32_t)(now - s_off_at) >= 0) {
+      s_off_at = 0;
+#if defined(PAGER_HAS_POWER_OFF)
+      powerOffNow();
+#endif
+    }
+    return;
+  }
+  s_low_reads = 0;
+  if (s_off_at) s_off_at = 0;
+  static char s_msg[96];
+  const char* msg = nullptr;
+  if (soc <= 10 && s_warned > 10) {
+    s_warned = 10;
+    snprintf(s_msg, sizeof s_msg, TR("Battery at %d%%: charge soon"), soc);
+    msg = s_msg;
+    if (vib_ok) pagerHapticsPattern(PAGER_VIB_THRICE, 2);
+  } else if (soc <= 20 && s_warned > 20) {
+    s_warned = 20;
+    snprintf(s_msg, sizeof s_msg, TR("Battery low: %d%%"), soc);
+    msg = s_msg;
+    if (vib_ok) pagerHapticsPattern(PAGER_VIB_TWICE, touchPrefsGetVibrateStrength());
+  }
+  if (!msg) return;
+  if (g_lv.task->isScreenOff()) s_pending = msg;
+  else                          g_lv.task->showAlert(msg, 5000);
+}
+
+// ---- Face down = quiet (Pager, Settings > Sound, off by default) ---------------
+// Lying face down for 3 s: the screen goes off and the Pager is quiet (no sound,
+// no vibration, no glance), as Do Not Disturb. Picking it up ends it. Reads the
+// accelerometer once a second only while the setting is on (the first read after
+// a boot uploads the sensor hub's firmware, a second or two).
+static int8_t s_face_pref = -1;         // the setting, cached; -1 = not read yet
+static void pagerFaceDownTick(uint32_t now) {
+  static uint32_t s_ms = 0, s_since = 0;
+  if (now - s_ms < 1000) return;
+  s_ms = now;
+  if (s_face_pref < 0) s_face_pref = touchPrefsGetFaceDownQuiet() ? 1 : 0;
+  if (!s_face_pref || now < 15000) {           // not in the first seconds after boot: let it settle
+    if (s_face_down) { s_face_down = false; updateGlobalStatusBar(); }
+    s_since = 0;
+    return;
+  }
+  float x, y, z;
+  if (!pagerImuRead(&x, &y, &z)) return;
+  if (!s_face_down) {
+    if (z < -0.8f) {
+      if (!s_since) s_since = now;
+      else if (now - s_since >= 3000) {
+        s_face_down = true;
+        s_since = 0;
+        pagerHapticsClick(1);           // a light tick: noticed
+        if (g_lv.task && !g_lv.task->isScreenOff()) g_lv.task->sleepScreen();
+        updateGlobalStatusBar();
+      }
+    } else {
+      s_since = 0;
+    }
+  } else if (z > -0.5f) {
+    s_face_down = false;
+    updateGlobalStatusBar();
+  }
+}
+static void pagerFaceDownSettingChanged(bool on) {
+  touchPrefsSetFaceDownQuiet(on);
+  s_face_pref = on ? 1 : 0;
+  if (!on && s_face_down) { s_face_down = false; updateGlobalStatusBar(); }
+}
+#endif
+
+#if defined(TLORA_PAGER)
+// ---- Shift + knob, hold Shift, hold Fn (Pager) --------------------------------
+// Shift + turn: screen brightness, without opening a menu; Shift + click switches
+// the same knob over to the volume. A small level pill shows what is changing and
+// goes away 1.5 s after the last step (and with it, back to brightness).
+// Hold Shift on its own: Quiet now (Do Not Disturb until held again).
+// Hold Fn on its own: the key help, an overview of every shortcut.
+// A hold only counts when nothing else happened meanwhile (no key, no turn, no
+// click): s_pager_input_seq moves on with every one of those.
+static void     applyBrightness(uint8_t pct);
+static uint8_t  pagerBrightnessNow();
+static lv_obj_t*   s_ql_pill  = nullptr;   // the level pill (lv_layer_sys), while up
+static lv_obj_t*   s_ql_title = nullptr;
+static lv_obj_t*   s_ql_value = nullptr;
+static lv_obj_t*   s_ql_bar   = nullptr;
+static lv_obj_t*   s_ql_hint  = nullptr;
+static lv_timer_t* s_ql_timer = nullptr;
+static uint8_t     s_ql_mode  = 0;         // 0 brightness, 1 volume
+static bool        s_ql_bright_dirty = false, s_ql_vol_dirty = false;
+static lv_obj_t*   s_keyhelp  = nullptr;   // the key help overlay, while up
+
+static void pagerQuickLevelClose() {
+  if (s_ql_timer) { lv_timer_del(s_ql_timer); s_ql_timer = nullptr; }
+  if (s_ql_pill && lv_obj_is_valid(s_ql_pill)) lv_obj_del(s_ql_pill);
+  s_ql_pill = s_ql_title = s_ql_value = s_ql_bar = s_ql_hint = nullptr;
+  // Saved once at the end, not on every detent.
+  if (s_ql_bright_dirty) touchPrefsSetBrightness(pagerBrightnessNow());
+  s_ql_bright_dirty = s_ql_vol_dirty = false;
+  s_ql_mode = 0;
+}
+static void pagerQuickLevelTimerCb(lv_timer_t*) { s_ql_timer = nullptr; pagerQuickLevelClose(); }
+
+static void pagerQuickLevelRefresh() {
+  if (!s_ql_pill) {
+    s_ql_pill = lv_obj_create(lv_layer_sys());
+    lv_obj_remove_style_all(s_ql_pill);
+    lv_obj_set_size(s_ql_pill, 280, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(s_ql_pill, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_ql_pill, lv_color_hex(COLOR_CONTROL), LV_PART_MAIN);
+    lv_obj_set_style_radius(s_ql_pill, 16, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_ql_pill, s_theme_high_contrast ? 2 : 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_ql_pill, lv_color_hex(s_theme_high_contrast ? COLOR_TEXT : COLOR_BORDER), LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(s_ql_pill, 16, LV_PART_MAIN);
+    lv_obj_set_style_shadow_color(s_ql_pill, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_shadow_opa(s_ql_pill, LV_OPA_60, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(s_ql_pill, 14, LV_PART_MAIN);
+    lv_obj_set_style_pad_ver(s_ql_pill, 8, LV_PART_MAIN);
+    lv_obj_clear_flag(s_ql_pill, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(s_ql_pill, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_ql_pill, LV_OBJ_FLAG_FLOATING);
+    s_ql_title = lv_label_create(s_ql_pill);
+    lv_obj_set_style_text_font(s_ql_title, &g_font_semi_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_ql_title, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
+    lv_obj_align(s_ql_title, LV_ALIGN_TOP_LEFT, 0, 0);
+    s_ql_value = lv_label_create(s_ql_pill);
+    lv_obj_set_style_text_font(s_ql_value, &g_font_semi_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_ql_value, lv_color_hex(COLOR_ACCENT), LV_PART_MAIN);
+    lv_obj_align(s_ql_value, LV_ALIGN_TOP_RIGHT, 0, 0);
+    s_ql_bar = lv_bar_create(s_ql_pill);
+    lv_obj_set_size(s_ql_bar, lv_pct(100), 8);
+    lv_obj_align(s_ql_bar, LV_ALIGN_TOP_MID, 0, 24);
+    lv_bar_set_range(s_ql_bar, 0, 100);
+    lv_obj_set_style_bg_color(s_ql_bar, lv_color_hex(COLOR_HAIR), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_ql_bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_ql_bar, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_ql_bar, 4, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_ql_bar, 4, LV_PART_INDICATOR);
+    s_ql_hint = lv_label_create(s_ql_pill);
+    lv_obj_set_style_text_font(s_ql_hint, &g_font_12, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_ql_hint, lv_color_hex(COLOR_SUB), LV_PART_MAIN);
+    lv_obj_align(s_ql_hint, LV_ALIGN_TOP_LEFT, 0, 38);
+  }
+  int v;
+  const char* hint;
+  if (s_ql_mode == 0) {
+    v = pagerBrightnessNow();
+    lv_label_set_text_fmt(s_ql_title, LV_SYMBOL_IMAGE "  %s", TR("Brightness"));
+    hint = TR("Shift + click: volume");
+  } else {
+    v = touchPrefsGetSoundVolume();
+    lv_label_set_text_fmt(s_ql_title, "%s  %s", v ? LV_SYMBOL_VOLUME_MAX : LV_SYMBOL_MUTE, TR("Volume"));
+    hint = (g_lv.task && g_lv.task->isBuzzerQuiet()) ? TR("Sound is off")
+         : dndActive()                               ? TR("Do Not Disturb is on")
+                                                     : TR("Shift + click: brightness");
+  }
+  lv_label_set_text_fmt(s_ql_value, "%d%%", v);
+  lv_label_set_text(s_ql_hint, hint);
+  lv_bar_set_value(s_ql_bar, v, LV_ANIM_OFF);
+  lv_obj_align(s_ql_pill, LV_ALIGN_TOP_MID, 0, 2);
+  lv_obj_move_foreground(s_ql_pill);
+  if (s_ql_timer) lv_timer_reset(s_ql_timer);
+  else { s_ql_timer = lv_timer_create(pagerQuickLevelTimerCb, 1500, nullptr); lv_timer_set_repeat_count(s_ql_timer, 1); }
+}
+
+static void pagerQuickLevelStep(int delta) {
+  if (s_ql_mode == 0) {
+    int v = (int)pagerBrightnessNow() + delta * 5;
+    if (v < 5) v = 5; if (v > 100) v = 100;
+    applyBrightness((uint8_t)v);
+    s_ql_bright_dirty = true;
+  } else {
+    int v = (int)touchPrefsGetSoundVolume() + delta * 5;
+    if (v < 0) v = 0; if (v > 100) v = 100;
+    touchPrefsSetSoundVolume((uint8_t)v);
+    if (soundPreviewAllowed(false)) uiPlayNotify();   // hear the new level
+  }
+  pagerQuickLevelRefresh();
+}
+
+// The key help: every shortcut on one page. Turning scrolls it, a click or any key
+// closes it.
+static void pagerKeyHelpClose() {
+  if (s_keyhelp && lv_obj_is_valid(s_keyhelp)) lv_obj_del(s_keyhelp);
+  s_keyhelp = nullptr;
+}
+static void pagerKeyHelpOpen() {
+  pagerQuickLevelClose();
+  if (s_keyhelp) return;
+  struct Row { const char* keys; const char* what; };
+  static const Row k_rows[] = {
+    { "Knob",               "Move, click to select" },
+    { "Hold knob",          "Back" },
+    { "Fn + turn",          "Next tab, or scroll inside a screen" },
+    { "Shift + turn",       "Screen brightness" },
+    { "Shift + click",      "Switch the knob to volume" },
+    { "Hold Shift",         "Quiet now (Do Not Disturb) on / off" },
+    { "Hold Fn",            "This help" },
+    { "Backspace",          "Back (deletes while typing)" },
+    { "Hold Backspace",     "Back from a text field; unlock" },
+    { "Hold Space",         "Lock the screen" },
+    { "Hold Enter",         "More actions (like a long press)" },
+    { "M  C  H  A  S",      "Tabs (Settings > Keyboard)" },
+    { "Hold H / Hold S",    "Launcher options / Control panel" },
+    { "Hold a letter",      "Accents and umlauts" },
+    { "Fn + Shift",         "Caps Lock while typing" },
+    { "Fn + Backspace",     "Home" },
+    { "Fn + Enter",         "Paste" },
+    { "Fn + click",         "Special characters while typing" },
+    { "N",                  "In a chat: jump to new messages" },
+    { "W A S D,  Q / E",    "Pan the map; adjust a slider" },
+  };
+  s_keyhelp = lv_obj_create(lv_layer_sys());
+  lv_obj_remove_style_all(s_keyhelp);
+  lv_obj_set_size(s_keyhelp, lv_pct(100), lv_pct(100));
+  lv_obj_set_style_bg_opa(s_keyhelp, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(s_keyhelp, lv_color_hex(COLOR_BG), LV_PART_MAIN);
+  lv_obj_set_style_pad_hor(s_keyhelp, 14, LV_PART_MAIN);
+  lv_obj_set_style_pad_ver(s_keyhelp, 8, LV_PART_MAIN);
+  lv_obj_set_style_pad_row(s_keyhelp, 3, LV_PART_MAIN);
+  lv_obj_set_flex_flow(s_keyhelp, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_scrollbar_mode(s_keyhelp, LV_SCROLLBAR_MODE_ACTIVE);
+  lv_obj_clear_flag(s_keyhelp, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_t* t = lv_label_create(s_keyhelp);
+  lv_obj_set_style_text_font(t, &g_font_semi_16, LV_PART_MAIN);
+  lv_obj_set_style_text_color(t, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
+  lv_label_set_text(t, TR("Keys and shortcuts"));
+  lv_obj_t* sub = lv_label_create(s_keyhelp);
+  lv_obj_set_style_text_font(sub, &g_font_12, LV_PART_MAIN);
+  lv_obj_set_style_text_color(sub, lv_color_hex(COLOR_SUB), LV_PART_MAIN);
+  lv_label_set_text(sub, TR("Turn to scroll, click or any key to close."));
+  lv_obj_set_style_pad_bottom(sub, 4, LV_PART_MAIN);
+  const lv_coord_t key_w = 150;
+  for (const Row& r : k_rows) {
+    lv_obj_t* row = lv_obj_create(s_keyhelp);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t* k = lv_label_create(row);
+    lv_obj_set_width(k, key_w);
+    lv_obj_set_style_text_font(k, &g_font_semi_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(k, lv_color_hex(COLOR_ACCENT), LV_PART_MAIN);
+    lv_label_set_text(k, TR(r.keys));
+    lv_obj_t* w = lv_label_create(row);
+    lv_obj_set_width(w, lv_pct(100));
+    lv_obj_set_style_pad_left(w, key_w + 6, LV_PART_MAIN);
+    lv_label_set_long_mode(w, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(w, &g_font_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(w, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
+    lv_label_set_text(w, TR(r.what));
+  }
+  lv_obj_move_foreground(s_keyhelp);
+}
+
+// The knob while Shift is held or the key help is up. True = the turn/click is
+// taken here and must not also move the focus.
+static bool pagerModifierKnob(int delta, bool held) {
+  static bool s_click_was = false, s_owned = false;
+  if (delta != 0 || held) s_pager_input_seq++;
+  const bool press = held && !s_click_was;
+  s_click_was = held;
+  if (s_owned) {                     // a click that began here: keep it until it is let go
+    if (!held) s_owned = false;
+    if (s_keyhelp && delta) lv_obj_scroll_by_bounded(s_keyhelp, 0, -delta * 40, LV_ANIM_ON);
+    return true;
+  }
+  if (s_keyhelp) {
+    if (delta) lv_obj_scroll_by_bounded(s_keyhelp, 0, -delta * 40, LV_ANIM_ON);
+    if (press) { pagerKeyHelpClose(); s_owned = true; }
+    return true;
+  }
+  if (!pagerKeyboardShiftHeld()) return false;
+  if (press) {
+    s_owned = true;
+    s_ql_mode = s_ql_pill ? (uint8_t)(s_ql_mode ^ 1) : 1;   // first Shift + click goes to volume
+    pagerQuickLevelRefresh();
+    return true;
+  }
+  if (delta) { pagerQuickLevelStep(delta); return true; }
+  return false;
+}
+
+// Hold Shift / hold Fn on their own, from the loop after the keys are drained.
+static void updatePagerModifierHolds(uint32_t now) {
+  static constexpr uint32_t kHoldMs = 1500;
+  static uint32_t s_shift_t0 = 0, s_fn_t0 = 0, s_shift_seq = 0, s_fn_seq = 0;
+  static bool     s_shift_done = false, s_fn_done = false;
+  const bool usable = g_lv.task && !g_lv.task->isScreenOff() && !g_lv.task->isManualLock() &&
+                      !s_pin_root && !s_remote_mode;
+  const bool sh = usable && pagerKeyboardShiftHeld() && !pagerKeyboardAltHeld();
+  if (!sh) { s_shift_t0 = 0; s_shift_done = false; }
+  else if (!s_shift_t0) { s_shift_t0 = now ? now : 1; s_shift_seq = s_pager_input_seq; }
+  else if (s_shift_seq != s_pager_input_seq) { s_shift_done = true; }   // used as a modifier: not a hold
+  else if (!s_shift_done && now - s_shift_t0 >= kHoldMs) {
+    s_shift_done = true;
+    s_quiet_manual = !s_quiet_manual;
+    pagerHapticsPattern(s_quiet_manual ? PAGER_VIB_TWICE : PAGER_VIB_ONCE, touchPrefsGetVibrateStrength());
+    g_lv.task->showAlert(s_quiet_manual ? TR("Quiet now: on (hold Shift again to end)") : TR("Quiet now: off"), 2000);
+    updateGlobalStatusBar();
+    g_lv.task->noteUserInput();
+  }
+  const bool fn = usable && pagerKeyboardAltHeld() && !pagerKeyboardShiftHeld();
+  if (!fn) { s_fn_t0 = 0; s_fn_done = false; }
+  else if (!s_fn_t0) { s_fn_t0 = now ? now : 1; s_fn_seq = s_pager_input_seq; }
+  else if (s_fn_seq != s_pager_input_seq) { s_fn_done = true; }
+  else if (!s_fn_done && now - s_fn_t0 >= kHoldMs) {
+    s_fn_done = true;
+    pagerKeyboardMarkAltUsed();      // letting go must not arm the symbol layer as well
+    if (s_keyhelp) pagerKeyHelpClose(); else pagerKeyHelpOpen();
+    g_lv.task->noteUserInput();
+  }
+}
+#endif
+
 static void updatePagerEncoder(unsigned long now) {
 #if defined(TLORA_PAGER)
   s_hold_pct_wheel = -1;   // set again at the bottom while the knob is held towards Back
@@ -48583,6 +49074,10 @@ static void updatePagerEncoder(unsigned long now) {
   // Alt+turn is a modifier combo, not a solo tap -- mark it used so releasing
   // Alt afterward does not also arm the one-shot symbol layer.
   if (pagerKeyboardAltHeld() && delta != 0) pagerKeyboardMarkAltUsed();
+
+#if defined(TLORA_PAGER)
+  if (pagerModifierKnob(delta, held)) return;   // Shift + knob, or the key help is up
+#endif
 
   pagerSliderEditCheck();
 
@@ -49436,6 +49931,10 @@ static void pagerGaugeNote(char* out, size_t cap) {
   }
   const TLoraPagerBoard::GaugeInfo g = board.getGaugeInfo();
   if (!g.valid) return;
+  if (board.chargeCareHold() && g.current_ma <= 0 && board.externalPowerPresent() == 1) {
+    snprintf(out, cap, "%s", TR("Kept at 80% (battery care)"));
+    return;
+  }
   const int ma = g.current_ma < 0 ? -g.current_ma : g.current_ma;
   const uint16_t mins = g.current_ma > 0 ? g.to_full_min : g.to_empty_min;
   if (mins != 0xFFFF && mins > 0)
@@ -49874,7 +50373,7 @@ static void lockscreenShow() {
       // The widest line it can show, roughly: the gauge figures or a charge pause.
       lv_coord_t gw = 0;
       for (const char* w : { TR("%d mA \xC2\xB7 %u:%02u to full"), TR("Charging paused: too cold"),
-                             TR("Charging paused: too hot") })
+                             TR("Charging paused: too hot"), TR("Kept at 80% (battery care)") })
         gw = LV_MAX(gw, lv_txt_get_width(w, strlen(w), &g_font_12, 0, LV_TEXT_FLAG_NONE));
       batt_w += (lv_coord_t)(gw + SC(6) + 2 * SC(8));   // + pill padding
     }
@@ -54748,6 +55247,7 @@ static void applyBrightness(uint8_t pct) {
   s_brightness_pct = pct;
   display.setBrightness(pct);
 }
+static uint8_t pagerBrightnessNow() { return s_brightness_pct; }   // Shift + knob (pagerQuickLevelStep)
 #elif defined(HAS_TDECK_PRO) && !defined(HAS_TDECK_PRO_V1_0)
 #define HAS_CC_BRIGHTNESS 1
 static uint8_t s_brightness_pct = 100;
@@ -80876,6 +81376,8 @@ void UITask::loop() {
       noteKbActivity();   // Pro keypresses re-arm keyboard-light Auto mode
 #endif
 #if defined(TLORA_PAGER)
+      s_pager_input_seq++;
+      if (s_keyhelp) { pagerKeyHelpClose(); continue; }   // any key just closes the key help
       if (vibInputOn()) pagerHapticsClick(vibKeyLevel());
 #endif
       handleHwKey(key);
@@ -80893,6 +81395,9 @@ void UITask::loop() {
 #endif
     updatePagerBackspaceHold(now);
     updatePagerSpaceHold(now);
+#if defined(TLORA_PAGER)
+    updatePagerModifierHolds(now);   // hold Shift: Quiet now; hold Fn: the key help
+#endif
     // Missing on this board until now (T-Deck/M9 both already call it in their
     // own equivalent branch): without this the lock-screen clock/unread badge
     // never refreshed again after the first reveal -- correct at the moment
@@ -80924,6 +81429,9 @@ void UITask::loop() {
                         : TR("Battery temperature OK, charging again"), 4000);
     }
   }
+  if (_screen_off && s_keyhelp) pagerKeyHelpClose();
+  pagerLowBatteryTick(now);
+  pagerFaceDownTick(now);
 #endif
 #elif defined(HAS_M9_KEYBOARD)
   // Own the stall buckets for everything a keypress triggers. The "ui:input"

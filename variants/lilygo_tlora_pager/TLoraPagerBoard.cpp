@@ -271,6 +271,7 @@ void TLoraPagerBoard::refreshGauge() {
   g.health_pct    = gauge.getStateOfHealth();
   gauge_info_ = g;
   chargeThermalCheck(g.temp_c10);
+  chargeCareCheck(batt_soc_);
 }
 
 // Charging only between 0 and 45 °C pack temperature (the usual Li-ion window;
@@ -300,12 +301,46 @@ void TLoraPagerBoard::chargeThermalCheck(int16_t t) {
   }
   if (want == charge_temp_block_) return;
   charge_temp_block_ = want;
-  if (want) s_charger.disableCharge();
-  else      s_charger.enableCharge();
-  chg_ms_ = 0;                                   // re-read the charge status next time
-  Serial.printf("[POWER] charging %s (pack %d.%d C)\n",
-                want > 0 ? "paused, too hot" : want < 0 ? "paused, too cold" : "resumed",
+  Serial.printf("[POWER] temperature guard: %s (pack %d.%d C)\n",
+                want > 0 ? "too hot" : want < 0 ? "too cold" : "ok",
                 t / 10, (t < 0 ? -t : t) % 10);
+  chargeEnableApply();
+}
+
+// Battery care: with it on, charging stops once the gauge reports 80 % and only
+// starts again below 75 %, so the pack does not sit at 100 % on the charger all
+// day (the main thing that ages a Li-ion cell besides heat). Like the
+// temperature guard it only gates charging; the board still runs from USB.
+#define PAGER_CARE_STOP_PCT    80
+#define PAGER_CARE_RESUME_PCT  75
+void TLoraPagerBoard::chargeCareCheck(int soc) {
+  bool want = care_hold_;
+  if (!care_on_)                         want = false;
+  else if (soc < 0 || soc > 100)         return;      // no reading yet: change nothing
+  else if (!care_hold_ && soc >= PAGER_CARE_STOP_PCT)  want = true;
+  else if (care_hold_ && soc < PAGER_CARE_RESUME_PCT)  want = false;
+  if (want == care_hold_) return;
+  care_hold_ = want;
+  Serial.printf("[POWER] battery care: %s at %d %%\n", want ? "holding" : "charging", soc);
+  chargeEnableApply();
+}
+
+// The one place that switches the charger: on only when neither the temperature
+// guard nor battery care holds it off.
+void TLoraPagerBoard::chargeEnableApply() {
+  if (!charger_ready_) return;
+  const bool on = charge_temp_block_ == 0 && !care_hold_;
+  if (on == chg_enabled_) return;
+  chg_enabled_ = on;
+  if (on) s_charger.enableCharge();
+  else    s_charger.disableCharge();
+  chg_ms_ = 0;                                   // re-read the charge status next time
+  Serial.printf("[POWER] charging %s\n", on ? "on" : "off");
+}
+
+void TLoraPagerBoard::setChargeCare(bool on) {
+  care_on_ = on;
+  chargeCareCheck(batt_soc_);
 }
 
 void TLoraPagerBoard::setChargeLimits(uint16_t ma, uint16_t mv) {

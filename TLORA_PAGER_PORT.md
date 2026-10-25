@@ -61,6 +61,31 @@ The chips that had power but no driver now do something:
 | **BQ27220** gauge | Battery % from the gauge's StateOfCharge (as on the T-Display P4, #273). Design/full capacity set once to the fitted 1500 mAh pack, as LilyGoLib does; each attempt is recorded in NVS (`pagerhw/gauge_try`) so it is not retried every boot. The battery popup shows the live current/power, mAh and time left/to full, temperature, cycles and health; the 24 h chart adds the 5-min average current (right axis, `mA` chip swaps it for CPU MHz), logged as a sixth column. | `pagerConfigureGauge()`, `batteryPercentFromMv()`, `batteryGaugeBlock()` |
 | **BHI260AP** IMU (0x28) | `wada.sys.accel()` / `caps().accel` for Lua apps. The hub firmware (Klio image, ~120 KB) uploads on the first read, not at boot; the accelerometer stops 3 s after the last read. Axes remapped by the hub (`BOTTOM_LAYER_TOP_LEFT_CORNER`, vendor). | `PagerImu.*`, `luaHostAccel()` |
 
+Battery care and quiet modes (all Pager-only, gated `TLORA_PAGER`):
+
+- **Charge only to 80 %** (Settings > Battery > Battery care, default off):
+  `TLoraPagerBoard::setChargeCare()`; charging stops at 80 % gauge SOC and
+  resumes below 75 %. Temperature guard and battery care share one switch
+  decision (`chargeEnableApply()`). The popup, lock screen and screensaver say
+  "kept at 80 %" while it holds.
+- **Low battery warning** (same card, default on): on battery, a toast and a
+  vibration at 20 % and 10 % (once per discharge, shown at the next wake when
+  the screen was off); at 3 % for three readings in a row a 10 s countdown,
+  then `powerOffNow()` (ship mode). Plugging in cancels it.
+- **Daily use** in the battery popup: mAh drawn today and yesterday, integrated
+  from the 10 s gauge samples (`battDayTick()`), kept in NVS (`bat_day`,
+  `bat_mah`, not in the backup).
+- **Shift + knob**: Shift + turn = brightness, Shift + click = switch the knob to
+  volume; a level pill shows it (`pagerModifierKnob()`). Needs
+  `pagerKeyboardShiftHeld()` (new, additive getter in the shared keyboard driver).
+- **Hold Shift** alone 1.5 s = Quiet now (Do Not Disturb until held again, two
+  buzzes on, one off); also a switch in Settings > Sound > Do Not Disturb.
+- **Hold Fn** alone 1.5 s = key help, every shortcut on one page.
+- **Quiet when face down** (Settings > Sound > Do Not Disturb, default off):
+  accelerometer read once a second while on; z below -0.8 g for 3 s = screen off
+  and DND, z above -0.5 g ends it. **Still to confirm on hardware**: the sign of
+  z when face down.
+
 Power: with the screen dark and no app connected, a joined Wi-Fi drops to
 maximum modem sleep (`esp_wifi_set_ps(WIFI_PS_MAX_MODEM)`, `pagerWifiPsUpdate()`),
 back to the normal minimum modem sleep on wake or when a client connects

@@ -153,6 +153,11 @@ public:
   // -1 too cold, 0 charging allowed. See chargeThermalCheck().
   int chargeTempBlock() const { return charge_temp_block_; }
 
+  // Battery care (Settings > Battery): stop charging at 80 %, resume below 75 %.
+  // chargeCareHold() is true while it is holding the charger off.
+  void setChargeCare(bool on);
+  bool chargeCareHold() const { return care_hold_; }
+
   // The limits from Settings > Battery > Charging: fast-charge current (mA, 64 mA
   // steps) and charge voltage (mV, 16 mV steps), and the temperature guard's upper
   // limit in 0.1 deg C (0 = guard off). begin() starts at the safe defaults; the
@@ -175,6 +180,8 @@ public:
 private:
   void refreshGauge();
   void chargeThermalCheck(int16_t temp_c10);
+  void chargeCareCheck(int soc);
+  void chargeEnableApply();
 
   bool expander_ready_ = false;
   bool charger_ready_ = false;
@@ -189,5 +196,8 @@ private:
   int8_t   charge_temp_block_ = 0;   // chargeTempBlock()
   int16_t  chg_tmax_c10_ = 450;      // setChargeTempMax(); 0 = guard off
   int16_t  chg_tmin_c10_ = 0;        // setChargeTempMin()
+  bool     care_on_ = false;         // setChargeCare()
+  bool     care_hold_ = false;       // chargeCareHold()
+  bool     chg_enabled_ = true;      // what chargeEnableApply() last told the charger
   SemaphoreHandle_t expander_mutex_ = nullptr;
 };

@@ -636,6 +636,16 @@ uint8_t  touchPrefsGetChargeTmax();          // stop charging above this, deg C;
 void     touchPrefsSetChargeTmax(uint8_t c);
 uint8_t  touchPrefsGetChargeTmin();          // stop charging below this, deg C (default 0)
 void     touchPrefsSetChargeTmin(uint8_t c);
+bool     touchPrefsGetChargeCare();          // battery care: stop at 80 %, resume below 75 % (default off)
+void     touchPrefsSetChargeCare(bool on);
+bool     touchPrefsGetLowBattWarn();         // warn at 20 / 10 %, switch off at 3 % (default on)
+void     touchPrefsSetLowBattWarn(bool on);
+uint32_t touchPrefsGetBattDayKey();          // local date (YYYYMMDD) the daily mAh count below belongs to
+void     touchPrefsSetBattDayKey(uint32_t key);
+uint32_t touchPrefsGetBattDayMah();          // mAh drawn: today in the low 16 bits, the day before in the high
+void     touchPrefsSetBattDayMah(uint32_t v); // (0xFFFF = not known). Not in the backup: it is this pack's.
+bool     touchPrefsGetFaceDownQuiet();       // lying face down: screen off, no sound or vibration (default off)
+void     touchPrefsSetFaceDownQuiet(bool on);
 #endif
 bool    touchPrefsGetGlanceEnabled();          // master "at a glance" feature toggle (default true)
 void    touchPrefsSetGlanceEnabled(bool on);

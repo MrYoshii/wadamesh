@@ -194,6 +194,8 @@ void scriptStep() {
     if (cmd == "holdkey") {   // holdkey C MS: type C and keep its key down for MS (Pager simulator; C = space for the space bar)
       std::string k; int ms = 1000; in >> k >> ms;
       if (k == "space") k = " ";   // the stream drops a literal blank
+      if (k == "shift") k = "\x01";   // a modifier alone, held (Shift, Fn)
+      if (k == "fn")    k = "\x02";
       if (!k.empty()) simPagerHoldKey((uint8_t)k[0], (uint32_t)ms);
       s_script.wait_until = now + 50; return;
     }
