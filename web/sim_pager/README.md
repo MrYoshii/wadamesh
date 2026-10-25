@@ -18,6 +18,10 @@ WADA_DATA_DIR=/tmp/pager-data web/build-pager/wadamesh-host --headless --size 48
   --script web/sim_pager/tour.wada --shots /tmp/pager-shots
 ```
 
+The simulator works inside `WADA_DATA_DIR` (the Pager's tile partition has no
+directory of its own on the host, and its cache eviction would otherwise clean up
+the working directory), so pass absolute paths for `--script` and `--shots`.
+
 Screenshots are written at the canvas size (800x480); the Pager's screen is the
 top-left 480x222.
 
