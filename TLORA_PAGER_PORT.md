@@ -76,8 +76,10 @@ mode power-off, woken by holding the power key for about 2 s (a 1 s press
 was not enough). The sharp-tick key click was not felt and now uses the
 strong-click effect.
 
-**Still to confirm**: the stronger key click, the gauge percent after the
-capacity write, and the IMU upload time / axis signs.
+Also confirmed (2026-10-25): the strong-click key feedback, the gauge percent
+after the capacity write, the gauge popup, accent hold, and the current figures
+under Power above. **Still to confirm**: the IMU upload time / axis signs, and
+the 704 mA charge limit (the popup should read about 700 mA while charging).
 
 Risk 11 (keyboard/encoder scroll not repainting) is **accepted as
 workaround-final**: the Alt+turn free-scroll gesture is the intended fix for
