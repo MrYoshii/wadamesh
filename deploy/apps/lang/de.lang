@@ -2201,3 +2201,10 @@ A short click for each keypress and each turn of the knob.	Ein kurzes Klicken be
 Buzzes for the same messages as the sound below, even with Sound off. Do Not Disturb and muted channels stay still.	Vibriert bei denselben Nachrichten wie der Ton unten, auch wenn der Ton aus ist. Nicht stören und stummgeschaltete Kanäle bleiben still.
 Keys and the knob do nothing until you hold Backspace.	Tasten und Rad tun nichts, bis du Backspace hältst.
 The percentage comes from the battery's fuel gauge, which learns the pack by itself.	Der Prozentwert kommt vom Messchip im Akku, der den Akku selbst einlernt.
+Charging paused: too hot	Laden pausiert: zu heiß
+Charging paused: too cold	Laden pausiert: zu kalt
+Charging paused: battery too hot	Laden pausiert: Akku zu heiß
+Charging paused: battery too cold	Laden pausiert: Akku zu kalt
+Charging paused: battery too hot (%d °C)	Laden pausiert: Akku zu heiß (%d °C)
+Charging paused: battery too cold (%d °C)	Laden pausiert: Akku zu kalt (%d °C)
+Battery temperature OK, charging again	Akkutemperatur OK, lädt wieder
