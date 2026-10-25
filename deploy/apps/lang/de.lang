@@ -1,7 +1,7 @@
 # wadamesh language file
 # canonical source - translators: edit this file and PR it
 # code: de
-# ver: 29
+# ver: 30
 # name: Deutsch
 # base: de
  (device behind)	 (Gerät geht nach)
@@ -2181,3 +2181,23 @@ Powering off… press reset to wake	Schaltet aus… Reset drücken zum Aufwecken
 Low	Low
 F11 on the keyboard steps through these too.	F11 auf der Tastatur schaltet ebenfalls durch diese Stufen.
 Wi-Fi was switched off because the device crashed while it was on. Turn it on in Settings > Wi-Fi to try again.	Wi-Fi was switched off because the device crashed while it was on. Turn it on in Settings > Wi-Fi to try again.
+%d mA · %u:%02u left	%d mA · noch %u:%02u
+%d mA · %u:%02u to full	%d mA · voll in %u:%02u
+%d.%d °C · %u cycles · health %u%%	%d.%d °C · %u Zyklen · Zustand %u%%
+%u / %u mAh · %s left	%u / %u mAh · noch %s
+%u / %u mAh · full in %s	%u / %u mAh · voll in %s
+Charging %d mA · %d mW	Lädt %d mA · %d mW
+Drawing %d mA · %d mW	Verbraucht %d mA · %d mW
+Fuel gauge not answering	Akku-Messchip antwortet nicht
+last 5 min charging	letzte 5 Min. Laden
+last 5 min drawing	letzte 5 Min. Verbrauch
+Edit in Settings > Quick replies	Ändern unter Einstellungen > Schnellantworten
+Turn the knob • click to insert	Rad drehen • Klick zum Einfügen
+Powering off… hold the power key to switch on	Schaltet aus… Ein/Aus-Taste halten zum Einschalten
+Vibration	Vibration
+Vibrate	Vibrieren
+Vibrate on keys	Vibrieren bei Tasten
+A short click for each keypress and each turn of the knob.	Ein kurzes Klicken bei jedem Tastendruck und jedem Dreh am Rad.
+Buzzes for the same messages as the sound below, even with Sound off. Do Not Disturb and muted channels stay still.	Vibriert bei denselben Nachrichten wie der Ton unten, auch wenn der Ton aus ist. Nicht stören und stummgeschaltete Kanäle bleiben still.
+Keys and the knob do nothing until you hold Backspace.	Tasten und Rad tun nichts, bis du Backspace hältst.
+The percentage comes from the battery's fuel gauge, which learns the pack by itself.	Der Prozentwert kommt vom Messchip im Akku, der den Akku selbst einlernt.
