@@ -197,6 +197,9 @@ static_assert(ChannelSenderSplit::kMaxWireName >= (size_t)UITask::MAX_SENDER_NAM
   #if defined(HAS_PAGER_KEYBOARD)
     #include "../helpers/input/PagerKeyboard.h"
   #endif
+  #if defined(TLORA_PAGER) && !defined(WADA_WEB)
+    #include <esp_wifi.h>              // esp_wifi_set_ps: deeper modem sleep while the screen is off
+  #endif
   #if defined(TLORA_PAGER)
     #include "PagerHaptics.h"          // DRV2605 vibration motor (variants/lilygo_tlora_pager)
     #include "PagerImu.h"              // BHI260AP accelerometer, wada.sys.accel() (luaHostAccel)
@@ -47604,6 +47607,63 @@ static void pagerEnterRelease() {
   navFifoPush(LV_KEY_ENTER, false);
 }
 
+// Hold a letter to pick its accent, as on a phone keyboard: the box of variants that
+// typing it brought up lights its first cell after a short hold, the highlight steps
+// on while the key stays down, and letting go types the lit one. A quick tap still
+// types the plain letter. (Fn+Space and the knob keep working as before.)
+static void updatePagerAccentHold(uint32_t now) {
+  static uint32_t s_t0 = 0, s_step = 0;
+  static bool     s_on = false;
+  static uint8_t  s_base = 0;          // the held letter (ASCII), while s_on
+  static uint8_t  s_last[128] = {};    // per letter: the accent picked last time, +1 (0 = none yet)
+  constexpr uint32_t kFirstMs = 450, kStepMs = 450;
+  if (!s_accbox || s_accbox_cell_n == 0 || !g_lv.task || g_lv.task->isScreenOff()) {
+    s_t0 = 0; s_on = false;
+    return;
+  }
+  if (pagerKeyboardLetterHeld()) {
+    if (!s_t0) s_t0 = now ? now : 1;
+    if (!s_on && now - s_t0 >= kFirstMs) {
+      s_on = true;
+      s_accentnav_active = true;
+      s_accentnav_idx = 0;
+      s_base = 0;
+      if (s_accbox_ta && lv_obj_is_valid(s_accbox_ta)) {
+        const char* last = lastUtf8Start(lv_textarea_get_text(s_accbox_ta));
+        if (last && (uint8_t)last[0] < 128 && !last[1]) s_base = (uint8_t)last[0];
+      }
+      // In German the umlauts and ß are what a hold is almost always for: start there
+      // rather than four steps in (the set's order is shared with the other boards).
+      if (i18nGetLang() == LANG_DE) {
+        static const char* const kDe[] = { "\xC3\xA4", "\xC3\xB6", "\xC3\xBC", "\xC3\x9F",
+                                           "\xC3\x84", "\xC3\x96", "\xC3\x9C" };   // ä ö ü ß Ä Ö Ü
+        for (uint8_t i = 0; i < s_accbox_cell_n; ++i) {
+          lv_obj_t* l = s_accbox_cells[i] ? lv_obj_get_child(s_accbox_cells[i], 0) : nullptr;
+          const char* t = l ? lv_label_get_text(l) : nullptr;
+          bool hit = false;
+          for (const char* d : kDe) if (t && !strcmp(t, d)) hit = true;
+          if (hit) { s_accentnav_idx = i; break; }
+        }
+      }
+      // The accent this letter got last time comes first: one hold, no stepping.
+      if (s_base && s_last[s_base] && s_last[s_base] <= s_accbox_cell_n) s_accentnav_idx = s_last[s_base] - 1;
+      s_step = now;
+      accentNavRestyle();
+    } else if (s_on && now - s_step >= kStepMs) {
+      s_accentnav_idx = (s_accentnav_idx + 1) % (int)s_accbox_cell_n;
+      s_step = now;
+      accentNavRestyle();
+    }
+    if (s_on) g_lv.task->noteUserInput();
+    return;
+  }
+  if (s_on) {   // released after the hold: type the lit accent, and remember it
+    if (s_base) s_last[s_base] = (uint8_t)(s_accentnav_idx + 1);
+    accentNavConfirm();
+  }
+  s_t0 = 0; s_on = false;
+}
+
 static void updatePagerTabHold(uint32_t now) {
   if (s_pager_enter_down && (!pagerKeyboardLetterHeld() || !g_lv.task || g_lv.task->isScreenOff() ||
                              g_lv.task->isManualLock() || s_remote_mode))
@@ -76226,6 +76286,18 @@ static void setCpuForScreen(bool screen_on) {
   if (want == s_cur_mhz) return;
   setCpuFrequencyMhz(want);
   s_cur_mhz = want;
+#if defined(TLORA_PAGER) && !defined(WADA_WEB)
+  // A joined Wi-Fi is the Pager's largest draw after the backlight: with the screen
+  // dark and no app connected, let the modem sleep through more beacons (maximum
+  // modem sleep: it wakes every listen interval instead of every DTIM). Still
+  // associated, so the web client and the app reconnect as before, a beat slower.
+  // Waking the screen, or a connected client, returns it to the normal setting.
+  // (Never WIFI_PS_NONE: illegal while Bluetooth runs, see main.cpp.)
+  if (WiFi.getMode() != WIFI_OFF) {
+    const bool deep = !screen_on && the_mesh.getProtoNumClients() == 0;
+    esp_wifi_set_ps(deep ? WIFI_PS_MAX_MODEM : WIFI_PS_MIN_MODEM);
+  }
+#endif
 #endif
 }
 #else
@@ -80066,6 +80138,7 @@ void UITask::loop() {
       !pinTypingLocked(true, g_lv.task->isScreenOff())) pagerKeyboardDiscardAlt();
 #if defined(TLORA_PAGER)
   updatePagerTabHold(now);   // a Home/Settings shortcut: released = tap, held = the long press
+  updatePagerAccentHold(now);   // a held letter steps through its accents
 #endif
   // Remote Mode keeps the placeholder lit and reserves all keys for its local
   // escape path, so normal lock/backlight state machines stay paused there.

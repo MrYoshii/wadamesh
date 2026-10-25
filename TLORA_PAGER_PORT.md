@@ -61,6 +61,11 @@ The chips that had power but no driver now do something:
 | **BQ27220** gauge | Battery % from the gauge's StateOfCharge (as on the T-Display P4, #273). Design/full capacity set once to the fitted 1500 mAh pack, as LilyGoLib does; a refusal is recorded in NVS (`pagerhw/gauge_fail`) so it is not retried every boot. | `pagerConfigureGauge()`, `batteryPercentFromMv()` |
 | **BHI260AP** IMU (0x28) | `wada.sys.accel()` / `caps().accel` for Lua apps. The hub firmware (Klio image, ~120 KB) uploads on the first read, not at boot; the accelerometer stops 3 s after the last read. Axes remapped by the hub (`BOTTOM_LAYER_TOP_LEFT_CORNER`, vendor). | `PagerImu.*`, `luaHostAccel()` |
 
+Power: with the screen dark and no app connected, a joined Wi-Fi drops to
+maximum modem sleep (`esp_wifi_set_ps(WIFI_PS_MAX_MODEM)`, `setCpuForScreen`),
+back to the normal minimum modem sleep on wake or when a client connects.
+Measured gain still to be confirmed on hardware.
+
 Still not driven: the **ST25R3916 NFC** reader (needs ST's RFAL stack) and
 the codec's microphone input.
 

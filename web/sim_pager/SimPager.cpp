@@ -32,6 +32,7 @@ uint8_t s_head = 0, s_tail = 0;
 int s_enc_delta = 0;
 int s_click_frames = 0;   // > 0: the knob reads as pressed for this many more polls
 uint32_t s_hold_until = 0; // the knob reads as pressed until then (the Back hold)
+uint32_t s_letter_until = 0; // the last letter's key reads as held until then (holdkey)
 
 void drainHost() {
   for (int k; (k = cardKbReadKey()) != 0;) {
@@ -60,7 +61,12 @@ void pagerKeyboardMarkAltUsed() {}
 void pagerKeyboardDiscardAlt() {}
 bool pagerKeyboardBackspaceHeld() { return false; }
 bool pagerKeyboardSpaceHeld() { return false; }
-bool pagerKeyboardLetterHeld() { return false; }
+bool pagerKeyboardLetterHeld() { return s_letter_until && (int32_t)(millis() - s_letter_until) < 0; }
+void simPagerHoldKey(uint8_t c, uint32_t ms) {   // script: type c and hold its key for ms
+  const uint8_t next = (uint8_t)((s_head + 1) & 63u);
+  if (next != s_tail) { s_ring[s_head] = c; s_head = next; }
+  s_letter_until = millis() + ms;
+}
 bool pagerKeyboardConsumeAltShiftChord() { return false; }
 void pagerKeyboardToggleCaps() {}
 bool pagerKeyboardConsumeAltBackspaceChord() { return false; }
