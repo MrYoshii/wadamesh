@@ -18849,8 +18849,9 @@ static void buildGeneralPage() {
 static const uint16_t k_chg_ma[]   = { 256, 512, 704, 1024, 1536 };
 static const uint16_t k_chg_mv[]   = { 4096, 4208, 4288, 4352 };
 static const uint8_t  k_chg_tmax[] = { 40, 45, 50, 55, 0 };
+static const uint8_t  k_chg_tmin[] = { 0, 5, 10 };   // only upwards from 0: the safe direction, no warning
 static constexpr int  kChgMaSafe = 2, kChgMvSafe = 2, kChgTmaxSafe = 1;   // the defaults' indexes
-static lv_obj_t* s_chg_rows[3] = { nullptr, nullptr, nullptr };
+static lv_obj_t* s_chg_rows[4] = { nullptr, nullptr, nullptr, nullptr };
 static int s_chg_pend_kind = -1, s_chg_pend_idx = -1;   // the risky choice awaiting its confirm
 static int chgIndexOf(const uint16_t* v, int n, uint16_t x, int dflt) {
   for (int i = 0; i < n; ++i) if (v[i] == x) return i;
@@ -18859,11 +18860,13 @@ static int chgIndexOf(const uint16_t* v, int n, uint16_t x, int dflt) {
 static void chargeSettingsApply() {
   board.setChargeLimits(touchPrefsGetChargeMa(), touchPrefsGetChargeMv());
   board.setChargeTempMax((int16_t)touchPrefsGetChargeTmax() * 10);
+  board.setChargeTempMin((int16_t)touchPrefsGetChargeTmin() * 10);
 }
 static void chargeChoiceCommit(int kind, int i) {
   if (kind == 0) touchPrefsSetChargeMa(k_chg_ma[i]);
   if (kind == 1) touchPrefsSetChargeMv(k_chg_mv[i]);
   if (kind == 2) touchPrefsSetChargeTmax(k_chg_tmax[i]);
+  if (kind == 3) touchPrefsSetChargeTmin(k_chg_tmin[i]);
   chargeSettingsApply();
   if (s_chg_rows[kind] && lv_obj_is_valid(s_chg_rows[kind])) setChoicePick(s_chg_rows[kind], i);
 }
@@ -18875,7 +18878,8 @@ static void chargeChoiceCb(lv_event_t* e) {
   if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
   const int i = setChoiceIndex(e);
   lv_obj_t* row = lv_obj_get_parent(lv_event_get_current_target(e));
-  const int kind = row == s_chg_rows[0] ? 0 : row == s_chg_rows[1] ? 1 : row == s_chg_rows[2] ? 2 : -1;
+  const int kind = row == s_chg_rows[0] ? 0 : row == s_chg_rows[1] ? 1 : row == s_chg_rows[2] ? 2 :
+                   row == s_chg_rows[3] ? 3 : -1;
   if (kind < 0 || i < 0) return;
   const char* warn = nullptr;
   if (kind == 0 && i > kChgMaSafe)
@@ -18899,6 +18903,7 @@ static void chargeDefaultsCb(lv_event_t* e) {
   chargeChoiceCommit(0, kChgMaSafe);
   chargeChoiceCommit(1, kChgMvSafe);
   chargeChoiceCommit(2, kChgTmaxSafe);
+  chargeChoiceCommit(3, 0);
   if (g_lv.task) g_lv.task->showAlert(TR("Charging back to the safe defaults"), 1500);
 }
 static void buildChargeCard() {
@@ -18913,8 +18918,13 @@ static void buildChargeCard() {
   const char* t_o[] = { "40 \xC2\xB0" "C", "45 \xC2\xB0" "C", "50 \xC2\xB0" "C", "55 \xC2\xB0" "C", TR("Off") };
   int ti = kChgTmaxSafe;
   for (int i = 0; i < 5; ++i) if (k_chg_tmax[i] == touchPrefsGetChargeTmax()) ti = i;
-  s_chg_rows[2] = setChoiceRow(c, "Stop charging above", "Charging also stops below 0 \xC2\xB0" "C. It resumes 3 \xC2\xB0" "C back inside.",
+  s_chg_rows[2] = setChoiceRow(c, "Stop charging above", "It resumes 3 \xC2\xB0" "C below the limit.",
                                t_o, 5, ti, chargeChoiceCb);
+  const char* n_o[] = { "0 \xC2\xB0" "C", "5 \xC2\xB0" "C", "10 \xC2\xB0" "C" };
+  int ni = 0;
+  for (int i = 0; i < 3; ++i) if (k_chg_tmin[i] == touchPrefsGetChargeTmin()) ni = i;
+  s_chg_rows[3] = setChoiceRow(c, "Stop charging below", "Never below freezing. It resumes 3 \xC2\xB0" "C above the limit.",
+                               n_o, 3, ni, chargeChoiceCb);
   setActionRow(c, LV_SYMBOL_REFRESH, "Back to safe defaults", nullptr, chargeDefaultsCb);
 }
 #endif

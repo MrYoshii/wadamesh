@@ -279,9 +279,9 @@ void TLoraPagerBoard::refreshGauge() {
 // the gauge's reading decides: charging switches off outside the window and
 // back on 3 °C inside it, so it does not flap at the edge. The power path is
 // untouched: on USB the board keeps running from VBUS either way.
-// The upper limit can be changed (or the guard switched off) in Settings >
-// Battery > Charging, with a warning; the lower one is fixed.
-#define PAGER_CHG_TEMP_MIN_C10     0
+// Both limits can be changed in Settings > Battery > Charge limits: the upper
+// one (or the guard switched off) with a warning, the lower one only upwards
+// from 0 deg C, which is the safe direction.
 #define PAGER_CHG_TEMP_HYST_C10   30
 void TLoraPagerBoard::chargeThermalCheck(int16_t t) {
   if (!charger_ready_) return;
@@ -292,9 +292,9 @@ void TLoraPagerBoard::chargeThermalCheck(int16_t t) {
     if (t < -400 || t > 1000) return;            // not a plausible reading: change nothing
     if (charge_temp_block_ == 0) {
       if (t > chg_tmax_c10_)               want = 1;
-      else if (t < PAGER_CHG_TEMP_MIN_C10) want = -1;
+      else if (t < chg_tmin_c10_) want = -1;
     } else if (t <= chg_tmax_c10_ - PAGER_CHG_TEMP_HYST_C10 &&
-               t >= PAGER_CHG_TEMP_MIN_C10 + PAGER_CHG_TEMP_HYST_C10) {
+               t >= chg_tmin_c10_ + PAGER_CHG_TEMP_HYST_C10) {
       want = 0;
     }
   }
@@ -317,6 +317,11 @@ void TLoraPagerBoard::setChargeLimits(uint16_t ma, uint16_t mv) {
   s_charger.setChargerConstantCurr(ma);
   s_charger.setChargeTargetVoltage(mv);
   Serial.printf("[POWER] charge limits %u mA, %u mV\n", (unsigned)ma, (unsigned)mv);
+}
+
+void TLoraPagerBoard::setChargeTempMin(int16_t c10) {
+  chg_tmin_c10_ = c10 > 0 ? c10 : 0;             // never below freezing
+  chargeThermalCheck(gauge_info_.valid ? gauge_info_.temp_c10 : (int16_t)250);
 }
 
 void TLoraPagerBoard::setChargeTempMax(int16_t c10) {

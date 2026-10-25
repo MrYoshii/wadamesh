@@ -2214,7 +2214,6 @@ Faster charging heats and wears the battery.	Schnelleres Laden erwärmt den Akku
 Charge to	Laden bis
 Stopping lower gives a little less capacity and a longer battery life.	Früher aufhören gibt etwas weniger Kapazität und eine längere Akku-Lebensdauer.
 Stop charging above	Laden stoppen über
-Charging also stops below 0 °C. It resumes 3 °C back inside.	Unter 0 °C stoppt das Laden ebenfalls. Es geht 3 °C weiter innen wieder los.
 Back to safe defaults	Zurück zu den sicheren Standardwerten
 Charging back to the safe defaults	Laden wieder auf sicheren Standardwerten
 Use anyway	Trotzdem verwenden
@@ -2234,3 +2233,6 @@ Pulse	Puls
 Key click	Tastenklick
 @ mention	@-Erwähnung
 A click for each keypress and each turn of the knob.	Ein Klick bei jedem Tastendruck und jedem Dreh am Rad.
+Stop charging below	Laden stoppen unter
+Never below freezing. It resumes 3 °C above the limit.	Nie unter dem Gefrierpunkt. Es geht 3 °C über der Grenze wieder los.
+It resumes 3 °C below the limit.	Es geht 3 °C unter der Grenze wieder los.

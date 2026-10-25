@@ -40,6 +40,7 @@ public:
   // WADA_SIM_CHARGE_HOT=1: the temperature guard has charging paused (too hot).
   void setChargeLimits(uint16_t, uint16_t) {}
   void setChargeTempMax(int16_t) {}
+  void setChargeTempMin(int16_t) {}
   int chargeTempBlock() const { static const bool h = getenv("WADA_SIM_CHARGE_HOT") != nullptr; return h ? 1 : 0; }
   bool enterShipMode() { return false; }
   SdCardState sdCardState() { return SdCardState::Absent; }

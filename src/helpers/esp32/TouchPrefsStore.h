@@ -634,6 +634,8 @@ uint16_t touchPrefsGetChargeMv();            // charge voltage, mV (default 4288
 void     touchPrefsSetChargeMv(uint16_t mv);
 uint8_t  touchPrefsGetChargeTmax();          // stop charging above this, deg C; 0 = guard off (default 45)
 void     touchPrefsSetChargeTmax(uint8_t c);
+uint8_t  touchPrefsGetChargeTmin();          // stop charging below this, deg C (default 0)
+void     touchPrefsSetChargeTmin(uint8_t c);
 #endif
 bool    touchPrefsGetGlanceEnabled();          // master "at a glance" feature toggle (default true)
 void    touchPrefsSetGlanceEnabled(bool on);

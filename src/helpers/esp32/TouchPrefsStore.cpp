@@ -2526,6 +2526,8 @@ uint16_t touchPrefsGetChargeMv()        { if (!s_begun) touchPrefsBegin(); retur
 void     touchPrefsSetChargeMv(uint16_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUShort("chg_mv", v); }
 uint8_t  touchPrefsGetChargeTmax()      { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("chg_tmax", 45); }
 void     touchPrefsSetChargeTmax(uint8_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("chg_tmax", v); }
+uint8_t  touchPrefsGetChargeTmin()      { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("chg_tmin", 0); }
+void     touchPrefsSetChargeTmin(uint8_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("chg_tmin", v); }
 #endif
 bool touchPrefsGetGlanceEnabled()   { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("glance_en", 1) != 0; }
 void touchPrefsSetGlanceEnabled(bool on)    { if (!s_begun) touchPrefsBegin(); prefsPutUChar("glance_en", on ? 1 : 0); }

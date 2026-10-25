@@ -159,6 +159,7 @@ public:
   // UI applies the stored choice once it has loaded the prefs.
   void setChargeLimits(uint16_t ma, uint16_t mv);
   void setChargeTempMax(int16_t c10);
+  void setChargeTempMin(int16_t c10);   // lower limit, 0.1 deg C (default 0)
 
   // Real power-off: opens the charger's battery switch (BQ25896 ship mode,
   // BATFET_DIS), which takes the whole board down to the charger's own leakage,
@@ -187,5 +188,6 @@ private:
   uint32_t chg_ms_ = 0;     // when the charger was last read, 0 = never
   int8_t   charge_temp_block_ = 0;   // chargeTempBlock()
   int16_t  chg_tmax_c10_ = 450;      // setChargeTempMax(); 0 = guard off
+  int16_t  chg_tmin_c10_ = 0;        // setChargeTempMin()
   SemaphoreHandle_t expander_mutex_ = nullptr;
 };
