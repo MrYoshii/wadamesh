@@ -80,7 +80,7 @@ Battery care and quiet modes (all Pager-only, gated `TLORA_PAGER`):
   `pagerKeyboardShiftHeld()` (new, additive getter in the shared keyboard driver).
 - **Hold Shift** alone 1.5 s = Quiet now (Do Not Disturb until held again, two
   buzzes on, one off); also a switch in Settings > Sound > Do Not Disturb.
-- **Hold Fn** alone 1.5 s = key help, every shortcut on one page.
+- **Hold Fn** alone 2 s = key help, every shortcut on one page.
 - **Quiet when face down** (Settings > Sound > Do Not Disturb, default off):
   accelerometer read once a second while on; z below -0.8 g for 3 s = screen off
   and DND, z above -0.5 g ends it. **Still to confirm on hardware**: the sign of

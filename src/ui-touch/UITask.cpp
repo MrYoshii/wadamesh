@@ -48978,7 +48978,7 @@ static bool pagerModifierKnob(int delta, bool held) {
 
 // Hold Shift / hold Fn on their own, from the loop after the keys are drained.
 static void updatePagerModifierHolds(uint32_t now) {
-  static constexpr uint32_t kHoldMs = 1500;
+  static constexpr uint32_t kHoldMs = 1500, kFnHoldMs = 2000;   // Fn longer: it is held while deciding to turn
   static uint32_t s_shift_t0 = 0, s_fn_t0 = 0, s_shift_seq = 0, s_fn_seq = 0;
   static bool     s_shift_done = false, s_fn_done = false;
   const bool usable = g_lv.task && !g_lv.task->isScreenOff() && !g_lv.task->isManualLock() &&
@@ -48999,7 +48999,7 @@ static void updatePagerModifierHolds(uint32_t now) {
   if (!fn) { s_fn_t0 = 0; s_fn_done = false; }
   else if (!s_fn_t0) { s_fn_t0 = now ? now : 1; s_fn_seq = s_pager_input_seq; }
   else if (s_fn_seq != s_pager_input_seq) { s_fn_done = true; }
-  else if (!s_fn_done && now - s_fn_t0 >= kHoldMs) {
+  else if (!s_fn_done && now - s_fn_t0 >= kFnHoldMs) {
     s_fn_done = true;
     pagerKeyboardMarkAltUsed();      // letting go must not arm the symbol layer as well
     if (s_keyhelp) pagerKeyHelpClose(); else pagerKeyHelpOpen();
