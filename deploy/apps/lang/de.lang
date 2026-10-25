@@ -2208,3 +2208,19 @@ Charging paused: battery too cold	Laden pausiert: Akku zu kalt
 Charging paused: battery too hot (%d °C)	Laden pausiert: Akku zu heiß (%d °C)
 Charging paused: battery too cold (%d °C)	Laden pausiert: Akku zu kalt (%d °C)
 Battery temperature OK, charging again	Akkutemperatur OK, lädt wieder
+The defaults are the safe ones for this battery. Anything past them asks first.	Die Standardwerte sind die sicheren für diesen Akku. Alles darüber hinaus fragt vorher nach.
+Charge current	Ladestrom
+Faster charging heats and wears the battery.	Schnelleres Laden erwärmt den Akku und lässt ihn schneller altern.
+Charge to	Laden bis
+Stopping lower gives a little less capacity and a longer battery life.	Früher aufhören gibt etwas weniger Kapazität und eine längere Akku-Lebensdauer.
+Stop charging above	Laden stoppen über
+Charging also stops below 0 °C. It resumes 3 °C back inside.	Unter 0 °C stoppt das Laden ebenfalls. Es geht 3 °C weiter innen wieder los.
+Back to safe defaults	Zurück zu den sicheren Standardwerten
+Charging back to the safe defaults	Laden wieder auf sicheren Standardwerten
+Use anyway	Trotzdem verwenden
+Charge faster than 750 mA?\nLilyGo advises against it for this battery: it heats the cell and wears it out, and a damaged LiPo can swell or catch fire. Only where you can keep an eye on it.	Schneller als 750 mA laden?\nLilyGo rät bei diesem Akku davon ab: Die Zelle wird warm und altert schnell, und ein beschädigter LiPo kann sich aufblähen oder Feuer fangen. Nur unter Aufsicht.
+Charge to 4.35 V?\nOnly for high-voltage (LiHV) cells. It overcharges a normal LiPo, which can then swell, fail or catch fire.	Bis 4,35 V laden?\nNur für Hochvolt-Zellen (LiHV). Ein normaler LiPo wird damit überladen und kann sich aufblähen, ausfallen oder Feuer fangen.
+Switch the temperature guard off?\nThe Pager then charges a hot or frozen battery. Charging below 0 °C damages the cell inside and can cause a short later; charging it hot risks swelling and fire.	Temperaturschutz ausschalten?\nDer Pager lädt dann auch einen heißen oder gefrorenen Akku. Laden unter 0 °C schädigt die Zelle innen und kann später einen Kurzschluss verursachen; heiß laden riskiert Aufblähen und Feuer.
+Charge up to this temperature?\nAbove 45 °C a LiPo wears out fast while charging, and the risk of swelling or fire goes up.	Bis zu dieser Temperatur laden?\nÜber 45 °C altert ein LiPo beim Laden schnell, und das Risiko für Aufblähen oder Feuer steigt.
+Moving aurora stays still while Battery saver is on (Settings > Battery).	Die bewegte Aurora bleibt stehen, solange der Energiesparmodus an ist (Einstellungen > Akku).
+Charge limits	Ladegrenzen
