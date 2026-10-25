@@ -6420,6 +6420,16 @@ static void navTipFocusMoved(lv_obj_t* f) {
   lv_timer_resume(s_nav_tip_timer);
 }
 
+#if defined(TLORA_PAGER)
+// Scroll every scrolled container under `o` back to its top.
+static void navScrollTreeTop(lv_obj_t* o, int depth) {
+  if (!o || depth > 12) return;
+  if (lv_obj_has_flag(o, LV_OBJ_FLAG_SCROLLABLE) && lv_obj_get_scroll_y(o) > 0)
+    lv_obj_scroll_to_y(o, 0, LV_ANIM_OFF);
+  const uint32_t n = lv_obj_get_child_cnt(o);
+  for (uint32_t i = 0; i < n; ++i) navScrollTreeTop(lv_obj_get_child(o, i), depth + 1);
+}
+#endif
 static void navFocusCb(lv_group_t* g) {
   lv_obj_t* f = lv_group_get_focused(g);
   // Edit mode — decided only on a GENUINE move to a different field. The chat composer
@@ -6457,6 +6467,18 @@ static void navFocusCb(lv_group_t* g) {
   if (!s_nav_suppress_scroll) {
     lv_obj_t* scroll_target = navStoreRowFor(f);
     lv_obj_scroll_to_view_recursive(scroll_target ? scroll_target : f, LV_ANIM_OFF);
+#if defined(TLORA_PAGER)
+    // Turning back to the first stop of a page or popup brings back its top. A
+    // popup's first stop is often its X in a fixed header, outside the body that
+    // scrolled down with the later stops: focusing it moved nothing, and whatever
+    // sat above the first field (the Signal popup's chart, a page's intro) could
+    // not be reached again with the knob.
+    if (s_nav_count > 0 && f == s_nav_objs[0]) {
+      lv_obj_t* root = f;
+      while (lv_obj_get_parent(root) && lv_obj_get_parent(lv_obj_get_parent(root))) root = lv_obj_get_parent(root);
+      navScrollTreeTop(root, 0);
+    }
+#endif
   }
 }
 
@@ -24711,7 +24733,17 @@ static void openBatteryChartWindow() {
   const lv_coord_t y_top = (lv_coord_t)(full_mv < 3500 ? 4200 : full_mv);
   const lv_coord_t y_bot = 3400;
   // Inset for the axis-label gutters (V left, MHz right) — RF-monitor style.
-  const int chart_x = 30, chart_rpad = 30, chart_y = 18, chart_h = 122;
+  // Rows step by the fonts' real line heights: the fixed 18 px assumed a 12 px
+  // font, and on the boards that grow it (the Pager's 16-18 px text) every line
+  // below the chart overlapped the next and the card cut them off.
+  const int lh12 = (int)lv_font_get_line_height(&g_font_12) + 3;
+  const int lh14 = (int)lv_font_get_line_height(&g_font_14) + 4;
+#if defined(TLORA_PAGER)
+  const int chart_h = 84;   // the card is 184 px tall here: the chart leaves room for the figures
+#else
+  const int chart_h = 122;
+#endif
+  const int chart_x = 30, chart_rpad = 30, chart_y = LV_MAX(18, lh14);
   lv_obj_t* chart = lv_chart_create(card);
   lv_obj_set_size(chart, cardw - 20 - chart_x - chart_rpad, chart_h);
   lv_obj_set_pos(chart, chart_x, chart_y);
@@ -24765,7 +24797,7 @@ static void openBatteryChartWindow() {
 
   // ---- Bottom block (running y, top-down so nothing overlaps; the card scrolls
   // if it overflows the screen). Text capped to clear the CPU + trash buttons. ----
-  int by = chart_y + chart_h + 18;     // below the chart + its x-axis labels
+  int by = chart_y + chart_h + LV_MAX(18, lh12);   // below the chart + its x-axis labels
   const int row_y = by;                // buttons ride to the right of this block
   const lv_coord_t btxt_w = cardw - 20 - 72;
 
@@ -24779,7 +24811,7 @@ static void openBatteryChartWindow() {
   lv_obj_set_width(el, btxt_w);
   lv_label_set_long_mode(el, LV_LABEL_LONG_DOT);
   lv_obj_set_pos(el, 0, by);
-  by += 28;   // clear the 26-px CPU/trash button row before the full-width stats line
+  by += LV_MAX(28, lh14);   // clear the 26-px CPU/trash button row before the full-width stats line
 
   // stats
   char sub[72];
@@ -24799,7 +24831,7 @@ static void openBatteryChartWindow() {
   lv_obj_set_width(sl, cardw - 20);          // full width — its row has no buttons, so "MHz" never wraps
   lv_label_set_long_mode(sl, LV_LABEL_LONG_DOT);
   lv_obj_set_pos(sl, 0, by);
-  by += 18;
+  by += LV_MAX(18, lh12);
 
   // points count
   lv_obj_t* pl = lv_label_create(card);
@@ -24807,7 +24839,7 @@ static void openBatteryChartWindow() {
   lv_obj_set_style_text_font(pl, &g_font_12, LV_PART_MAIN);
   lv_obj_set_style_text_color(pl, lv_color_hex(COLOR_SUB), LV_PART_MAIN);
   lv_obj_set_pos(pl, 0, by);
-  by += 18;
+  by += LV_MAX(18, lh12);
 
   // Clear the battery history (with confirmation) — to the right of the text block.
   lv_obj_t* clr = lv_btn_create(card);
@@ -24844,7 +24876,7 @@ static void openBatteryChartWindow() {
   lv_obj_set_style_text_font(slph, &g_font_12, LV_PART_MAIN);
   lv_obj_set_style_text_color(slph, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
   lv_obj_set_pos(slph, 0, by);
-  by += 18;
+  by += LV_MAX(18, lh12);
 
   char slp1[64];
   snprintf(slp1, sizeof slp1, "%s \xc2\xb7 cycles %lu \xc2\xb7 asleep %u%%",
@@ -24858,14 +24890,14 @@ static void openBatteryChartWindow() {
   lv_obj_set_width(slp1l, cardw - 20);
   lv_label_set_long_mode(slp1l, LV_LABEL_LONG_WRAP);
   lv_obj_set_pos(slp1l, 0, by);
-  by += 18;
+  by += LV_MAX(18, lh12);
 
   lv_obj_t* slp2l = lv_label_create(card);
   lv_label_set_text_fmt(slp2l, "%s%s", TR("last wake: "), tsWakeReasonStr(touchSleep::lastWakeReason()));
   lv_obj_set_style_text_font(slp2l, &g_font_12, LV_PART_MAIN);
   lv_obj_set_style_text_color(slp2l, lv_color_hex(COLOR_SUB), LV_PART_MAIN);
   lv_obj_set_pos(slp2l, 0, by);
-  by += 18;
+  by += LV_MAX(18, lh12);
 
   // A low "asleep %" on its own does not say whether the parks are too short or the
   // device was simply never eligible, which is the only thing worth knowing when
@@ -24880,7 +24912,7 @@ static void openBatteryChartWindow() {
     lv_obj_set_width(slp3l, cardw - 20);
     lv_label_set_long_mode(slp3l, LV_LABEL_LONG_WRAP);
     lv_obj_set_pos(slp3l, 0, by);
-    by += 18;
+    by += LV_MAX(18, lh12);
   }
 }
 
@@ -47613,6 +47645,29 @@ static void updatePagerKbBacklight(unsigned long now) {
 // makes a message or popup body taller than the viewport impossible to read:
 // the next detent abandons it and reveals the following object. Consume detents
 // as page-scrolls until the focused oversized object reaches its edge.
+// Turning past the last focus stop of a page or popup whose body still has unread
+// content below it (the battery card's power-save lines, a help text under the last
+// button) scrolls that body on instead of wrapping focus round to the top; turning
+// back from the first stop does the same upwards. Without it, text below the last
+// control or above the first was unreachable with the knob.
+static bool pagerEncoderEdgeScroll(bool up) {
+  if (s_nav_count <= 0) return false;
+  lv_obj_t* focused = s_nav_group ? lv_group_get_focused(s_nav_group) : nullptr;
+  if (!focused || !lv_obj_is_valid(focused)) return false;
+  const int last = (s_nav_count < kNavMax ? s_nav_count : kNavMax) - 1;
+  if (focused != (up ? s_nav_objs[0] : s_nav_objs[last])) return false;
+  for (lv_obj_t* sc = lv_obj_get_parent(focused); sc; sc = lv_obj_get_parent(sc)) {
+    if (!lv_obj_has_flag(sc, LV_OBJ_FLAG_SCROLLABLE)) continue;
+    const lv_coord_t room = up ? lv_obj_get_scroll_top(sc) : lv_obj_get_scroll_bottom(sc);
+    if (room <= 0) continue;   // this one is at its edge: an outer scroller may not be
+    lv_coord_t step = lv_obj_get_content_height(sc) * 2 / 3;
+    if (step < 24) step = 24;
+    if (step > room) step = room;
+    lv_obj_scroll_by(sc, 0, up ? step : -step, LV_ANIM_ON);
+    return true;
+  }
+  return false;
+}
 static bool pagerEncoderScrollOversizedFocused(bool up) {
   lv_obj_t* focused = s_nav_group ? lv_group_get_focused(s_nav_group) : nullptr;
   if (!focused || !lv_obj_is_valid(focused)) return false;
@@ -48000,12 +48055,12 @@ static void updatePagerEncoder(unsigned long now) {
     // stepping focus out (pagerEncoderChatEdgeScroll).
     for (; delta > 0; delta--) {
       if (!navInfoModalScroll(false) && !pagerEncoderScrollOversizedFocused(false) &&
-          !pagerChatComposerNav(false) && !pagerEncoderChatEdgeScroll(false))
+          !pagerChatComposerNav(false) && !pagerEncoderChatEdgeScroll(false) && !pagerEncoderEdgeScroll(false))
         navPushTap(LV_KEY_NEXT);
     }
     for (; delta < 0; delta++) {
       if (!navInfoModalScroll(true) && !pagerEncoderScrollOversizedFocused(true) &&
-          !pagerChatComposerNav(true) && !pagerEncoderChatEdgeScroll(true))
+          !pagerChatComposerNav(true) && !pagerEncoderChatEdgeScroll(true) && !pagerEncoderEdgeScroll(true))
         navPushTap(LV_KEY_PREV);
     }
   }
