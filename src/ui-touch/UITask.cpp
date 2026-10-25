@@ -2914,6 +2914,25 @@ static void setSelectionGlow(lv_obj_t* obj, bool selected, lv_style_selector_t s
   const uint32_t cursor_part = knob_cursor ? LV_PART_KNOB : LV_PART_MAIN;
   lv_obj_remove_style(obj, &s_selection_glow_style, cursor_selector);
   lv_obj_remove_style(obj, &s_selection_glow_contrast_style, cursor_selector);
+#if defined(TLORA_PAGER)
+  // A bare label as a stop (an info line on a settings page): the inward ring
+  // drew straight through its text, which fills the label edge to edge. Ring it
+  // a few pixels outside instead; labels sit inside padded cards, so it is not
+  // clipped.
+  static lv_style_t s_label_glow;
+  static bool s_label_glow_ready = false;
+  if (lv_obj_check_type(obj, &lv_label_class)) {
+    if (!s_label_glow_ready) {
+      initSelectionGlowStyle(&s_label_glow, focusRingColor());
+      lv_style_set_outline_pad(&s_label_glow, 3);
+      lv_style_set_radius(&s_label_glow, 4);
+      s_label_glow_ready = true;
+    }
+    lv_obj_remove_style(obj, &s_label_glow, cursor_selector);
+    if (selected) lv_obj_add_style(obj, &s_label_glow, cursor_selector);
+    return;
+  }
+#endif
   if (selected) {
     // An outline vanishes on a fill of its own colour, and not only a solid one:
     // the Map's side buttons sit at 70% over the tiles (#576). Anything mostly
@@ -12372,6 +12391,8 @@ static void openEmojiPicker(lv_obj_t* ta, const char* const* items = k_emoji_ite
   lv_obj_t* hint = lv_label_create(card);
 #if defined(HAS_M9_KEYBOARD)
   lv_label_set_text(hint, TR("Arrows \xE2\x80\xA2 OK"));
+#elif defined(TLORA_PAGER)
+  lv_label_set_text(hint, TR("Turn the knob \xE2\x80\xA2 click to insert"));
 #else
   lv_label_set_text(hint, TR("Roll to highlight \xE2\x80\xA2 click to insert"));
 #endif
@@ -12384,10 +12405,15 @@ static void openEmojiPicker(lv_obj_t* ta, const char* const* items = k_emoji_ite
     const char* ht = lv_label_get_text(hint);
     const lv_coord_t title_w = lv_txt_get_width(tt, strlen(tt), &g_font_14, 0, LV_TEXT_FLAG_NONE);
     const lv_coord_t hint_w  = lv_txt_get_width(ht, strlen(ht), &g_font_12, 0, LV_TEXT_FLAG_NONE);
-    if (2 + title_w + 8 + hint_w + 24 <= cardw - 16) {
-      lv_obj_align(hint, LV_ALIGN_TOP_RIGHT, -24, 4);
+#if defined(TLORA_PAGER)
+    const lv_coord_t x_res = 40;   // the Pager's close badge (bigger text, focus ring) needs more than 24
+#else
+    const lv_coord_t x_res = 24;
+#endif
+    if (2 + title_w + 8 + hint_w + x_res <= cardw - 16) {
+      lv_obj_align(hint, LV_ALIGN_TOP_RIGHT, -x_res, 4);
     } else {
-      lv_obj_set_width(hint, cardw - 16 - 2 - 24);
+      lv_obj_set_width(hint, cardw - 16 - 2 - x_res);
       lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
       const lv_coord_t hy = lv_font_get_line_height(&g_font_14) + 2;
       lv_obj_set_pos(hint, 2, hy);
@@ -12780,7 +12806,11 @@ static void openQuickReplyPicker(LvChatPanel* p) {
 #endif
   const int y = title_h + gps_row_h + rows * (btn_h + row_gap);   // hint sits below the last row
   lv_obj_t* hint = lv_label_create(card);
+#if defined(TLORA_PAGER)
+  lv_label_set_text(hint, TR("Edit in Settings > Quick replies"));   // montserrat_12 has no arrow glyph
+#else
   lv_label_set_text(hint, TR("Edit in Settings \xe2\x86\x92 Quick replies"));
+#endif
   lv_obj_set_style_text_color(hint, lv_color_hex(COLOR_SUB), LV_PART_MAIN);
 #if defined(TLORA_PAGER)
   lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, LV_PART_MAIN);
@@ -14021,6 +14051,15 @@ static lv_obj_t* settingsCardIn(lv_obj_t* parent, const char* title) {
   return content;
 }
 
+// Width of a settings modal's "Close" button. The Pager's 16 px text cut it to
+// "Cl…" at 58 px; the Discovered header lines its own buttons up against it.
+static inline lv_coord_t settingsModalCloseW() {
+#if defined(TLORA_PAGER)
+  return 72;
+#else
+  return SC(58);
+#endif
+}
 static lv_obj_t* createSettingsModal(const char* title, SettingsModalKind kind) {
   if (s_settings_inline_parent) return settingsCardIn(s_settings_inline_parent, title && title[0] ? TR(title) : "");
   closeSettingsModal();
@@ -14063,7 +14102,7 @@ static lv_obj_t* createSettingsModal(const char* title, SettingsModalKind kind) 
   const bool info_page = (kind == SettingsModalKind::SystemInfo ||
                           kind == SettingsModalKind::MemoryInfo);
   lv_obj_t* close_btn = lv_btn_create(header);
-  lv_obj_set_size(close_btn, info_page ? SC(32) : SC(58), SC(32));
+  lv_obj_set_size(close_btn, info_page ? SC(32) : settingsModalCloseW(), SC(32));
   lv_obj_align(close_btn, LV_ALIGN_RIGHT_MID, -6, 0);
   styleButton(close_btn);
   lv_obj_add_event_cb(close_btn, settingsCloseCb, LV_EVENT_CLICKED, nullptr);
@@ -14960,7 +14999,12 @@ static void openDiscoveredModalCb(lv_event_t* e) {
     if (header) {
       lv_obj_t* cog = lv_btn_create(header);
       lv_obj_set_size(cog, SC(32), SC(32));
-      lv_obj_align(cog, LV_ALIGN_RIGHT_MID, -68, 0);   // just left of the 58 px "Close" (at -6)
+#if defined(TLORA_PAGER)
+      const lv_coord_t shift = settingsModalCloseW() - 58;   // the wider Close moves the row left
+#else
+      const lv_coord_t shift = 0;
+#endif
+      lv_obj_align(cog, LV_ALIGN_RIGHT_MID, -68 - shift, 0);   // just left of the 58 px "Close" (at -6)
       styleButton(cog);
       lv_obj_add_event_cb(cog, openDiscoveredSettingsSheetCb, LV_EVENT_CLICKED, nullptr);
       lv_obj_t* cl = lv_label_create(cog);
@@ -14972,7 +15016,7 @@ static void openDiscoveredModalCb(lv_event_t* e) {
       // each asc/desc). Always present so the control is visible even on an empty list.
       lv_obj_t* srt = lv_btn_create(header);
       lv_obj_set_size(srt, SC(32), SC(32));
-      lv_obj_align(srt, LV_ALIGN_RIGHT_MID, -106, 0);   // left of the cog
+      lv_obj_align(srt, LV_ALIGN_RIGHT_MID, -106 - shift, 0);   // left of the cog
       styleButton(srt);
       lv_obj_add_event_cb(srt, openDiscSortSheetCb, LV_EVENT_CLICKED, nullptr);
       lv_obj_t* srtl = lv_label_create(srt);
@@ -14983,7 +15027,7 @@ static void openDiscoveredModalCb(lv_event_t* e) {
       if (n > 0) {
         lv_obj_t* pb = lv_btn_create(header);
         lv_obj_set_size(pb, SC(32), SC(32));
-        lv_obj_align(pb, LV_ALIGN_RIGHT_MID, -144, 0);   // left of the sort
+        lv_obj_align(pb, LV_ALIGN_RIGHT_MID, -144 - shift, 0);   // left of the sort
         styleButton(pb);
         lv_obj_set_style_bg_color(pb, lv_color_hex(themeRole(0x7A2A2A, COLOR_STATUS_DANGER)), LV_PART_MAIN);
         lv_obj_set_style_text_color(pb, lv_color_hex(COLOR_ON_STATUS_DANGER), LV_PART_MAIN);
@@ -15017,7 +15061,11 @@ static void openDiscoveredModalCb(lv_event_t* e) {
 
     // Card background — full content width (was a fixed 222 px, leaving a gap).
     const lv_coord_t cw     = s_settings_content_w;
+#if defined(TLORA_PAGER)
+    const int        pad    = 4, add_w = 68, gap = 8;   // "Add" in the Pager's 16 px text wrapped at 56
+#else
     const int        pad    = 4, add_w = 56, gap = 8;
+#endif
     const lv_coord_t card_h = 52;
     const lv_coord_t name_h = lv_font_get_line_height(&g_font_14);
     // Leading type icon, matching the Contacts rows (#459) — the Discover pane was
@@ -18778,12 +18826,18 @@ static void buildBatteryPage() {
                  false,
 #endif
                  sleepIdleToggleCb);
+#if defined(TLORA_PAGER)
+    // The percentage is the fuel gauge's own state of charge, not a voltage curve:
+    // nothing to calibrate (and "hold to reset" has no key equivalent here).
+    setNote(c, "The percentage comes from the battery's fuel gauge, which learns the pack by itself.");
+#else
     // Calibrate: the current voltage counts as 100% (packs whose full voltage is not
     // 4.2 V). Tap sets it; hold resets.
     lv_obj_t* b = setActionRow(c, LV_SYMBOL_BATTERY_FULL, "Calibrate as full", nullptr, nullptr, nullptr, SET_NORMAL, false);
     lv_obj_add_event_cb(b, calibrateBatteryCb, LV_EVENT_SHORT_CLICKED, nullptr);
     lv_obj_add_event_cb(b, calibrateBatteryCb, LV_EVENT_LONG_PRESSED, nullptr);
     setNote(c, "Tap with a full battery to call its voltage 100%. Hold to go back to the default.");
+#endif
   }
 }
 
@@ -18832,7 +18886,12 @@ static void buildLockPage() {
     s_pin_lock_sw = setSwitchRow(c, "Lock when screen off", "Always on: e-paper keeps showing its last frame.", true, nullptr);
     setSwitchEnable(s_pin_lock_sw, false);
 #else
-    s_pin_lock_sw = setSwitchRow(c, "Lock when screen off", "The touchscreen ignores taps until you unlock.",
+    s_pin_lock_sw = setSwitchRow(c, "Lock when screen off",
+#if defined(TLORA_PAGER)
+                                 "Keys and the knob do nothing until you hold Backspace.",   // no touchscreen
+#else
+                                 "The touchscreen ignores taps until you unlock.",
+#endif
 #if defined(ESP32)
                                  touchPrefsGetLockOnScreenOff(),
 #else
@@ -30324,7 +30383,7 @@ static void openDiscoverPage() {
   useChainedFont(mlbl);
   lv_label_set_text(mlbl, TR("Map"));
   lv_obj_center(mlbl);
-#if CAP_LARGE_SCREEN
+#if CAP_LARGE_SCREEN || defined(TLORA_PAGER)   // the Pager's 16 px text cut "Map"/"Stop" to "Ma"/"S…" too
   // Large panels draw these labels in the scaled UI font, which crowded the
   // fixed 56 px buttons and left them 4 px apart. Size each to its label (56 px
   // at least), give them real room between and off the edge, and end the
@@ -30357,7 +30416,14 @@ static void openDiscoverPage() {
 
   lv_obj_t* sc = lv_obj_create(s_discover_root);
   lv_obj_remove_style_all(sc);
+#if defined(TLORA_PAGER)
+  // top is relative to this root here (one-row bar): list from below the
+  // buttons to above the footer line, which sits on the root's last row.
+  const int foot_h = (int)lv_font_get_line_height(&g_font_12) + 6;
+  lv_obj_set_size(sc, sw, H - (top + 30) - foot_h);
+#else
   lv_obj_set_size(sc, sw, H - (top - STATUSBAR_H) - 34 - 20);   // leave a row for the wardrive footer
+#endif
   lv_obj_set_pos(sc, 0, top + 30);
   lv_obj_set_style_bg_opa(sc, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_pad_all(sc, 8, LV_PART_MAIN);
@@ -30377,7 +30443,11 @@ static void openDiscoverPage() {
   s_disc_footer = lv_label_create(s_discover_root);
   lv_label_set_recolor(s_disc_footer, true);
   lv_obj_set_style_text_font(s_disc_footer, &g_font_12, LV_PART_MAIN);
+#if defined(TLORA_PAGER)
+  lv_obj_set_pos(s_disc_footer, 10, H - foot_h + 2);
+#else
   lv_obj_set_pos(s_disc_footer, 10, STATUSBAR_H + H - 18);
+#endif
   char footer[96];
   snprintf(footer, sizeof footer, "%s", TR("#7A7F87 Wardrive: \xE2\x80\xA6#"));
   normalizeLightSurfaceRecolor(footer);

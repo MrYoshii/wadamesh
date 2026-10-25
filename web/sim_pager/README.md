@@ -30,8 +30,13 @@ top-left 480x222.
 | Left / Esc | hold the knob ~1.2 s (Back) |
 | Enter, Backspace, letters | the keyboard's own keys |
 
-Alt/Fn chords and press-and-hold letters (Hold S, Space to lock) are not
-simulated.
+Script-only: `holdkey C MS` types C and keeps its key down for MS (the accent
+picker on a held letter); `holdkey space MS` holds the space bar (Space to lock),
+and a `key bs` tap on the dark locked screen shows the lock screen. Alt/Fn
+chords are not simulated.
+
+`WADA_SIM_CHARGING=1` in the environment fakes USB charging at about 480 mA
+(charge icon, gauge lines, the screensaver while idle).
 
 ## What is stubbed
 
