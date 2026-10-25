@@ -6225,7 +6225,7 @@ static bool      s_nav_show     = false;       // T-Deck: focus-visible — pain
 static bool      s_nav_suppress_scroll = false;
 static lv_obj_t* s_nav_focus_hint = nullptr;   // one-shot: focus this object on the next rebuild (#45)
 static bool      s_nav_focus_first_thread = false; // one-shot: entering Chats starts at the top row
-#if defined(HAS_M9_KEYBOARD)
+#if defined(HAS_M9_KEYBOARD) || defined(TLORA_PAGER)
 static lv_obj_t* s_m9_focus_pending = nullptr;  // retained until the requested target owns nav
 #endif
 static void goToTab(int idx);                  // (defined far below) tab switch + refresh
@@ -7952,7 +7952,7 @@ static void navMaybeRebuild() {
   // When a chat just opened, drop focus on its composer so typing goes straight in (issue: textfield
   // not auto-selected). Only on the open transition, so new messages don't steal focus mid-typing.
   bool focus_set = false;   // true once we deliberately focus a COLLECTED obj (else LVGL defaults to the first item)
-#if defined(HAS_M9_KEYBOARD)
+#if defined(HAS_M9_KEYBOARD) || defined(TLORA_PAGER)
   if (s_m9_focus_pending && !lv_obj_is_valid(s_m9_focus_pending))
     s_m9_focus_pending = nullptr;
   if (s_m9_focus_pending) {
@@ -11327,7 +11327,7 @@ static int      s_chat_jump_msg_idx = -1;  // ring-slot index to scroll to on op
 // the floating HOME button (backBtnCb) and the left→right swipe-back gesture.
 static void closeChatPanel(LvChatPanel* p) {
   if (!p || !p->detail_open) return;  // already closed (e.g. a repeat fire)
-#if defined(HAS_M9_KEYBOARD)
+#if defined(HAS_M9_KEYBOARD) || defined(TLORA_PAGER)
   if (s_m9_focus_pending == p->composer_ta ||
       s_m9_focus_pending == p->symbol_btn ||
       s_m9_focus_pending == p->emoji_btn ||
@@ -43274,6 +43274,20 @@ enum ChatLinkKind : uint8_t { CHAT_LINK_URL, CHAT_LINK_HASHTAG, CHAT_LINK_COORD 
 static int messageMenuLinkCount(const char* text, ChatLinkKind kind);
 static void messageMenuLinkCb(lv_event_t* e);
 
+// The Pager types only into the field that holds the nav focus. Closing the action
+// menu hands the focus back to the bubble it was opened on, so after Ack / Mention
+// the keyboard typed nowhere until the chat was reopened: ask the next nav rebuild
+// to put the focus on the composer instead (the M9's pending-focus path).
+static void composerFocusAfterMenu(LvChatPanel& p) {
+#if defined(TLORA_PAGER)
+  if (!p.composer_ta || !lv_obj_is_valid(p.composer_ta)) return;
+  s_m9_focus_pending = p.composer_ta;
+  navMarkDirty();
+#else
+  (void)p;
+#endif
+}
+
 // Insert "@[<sender>] " into the channel composer so you can @mention them. The
 // bracketed form is the mention syntax the other clients use (textMentionsMe
 // also accepts a bare "@name" for backward-compat).
@@ -43290,6 +43304,7 @@ static void msgMenuMentionCb(lv_event_t* e) {
   lv_textarea_add_text(p.composer_ta, ins);
   lv_textarea_set_cursor_pos(p.composer_ta, LV_TEXTAREA_CURSOR_LAST);
   showKb(&p);                               // focus composer so typing continues there
+  composerFocusAfterMenu(p);
 }
 
 static void msgMenuBackdropCb(lv_event_t* e) {
@@ -43427,6 +43442,7 @@ static void msgMenuAckCb(lv_event_t* e) {
   lv_textarea_add_text(p.composer_ta, s_msg_menu_ack);
   lv_textarea_set_cursor_pos(p.composer_ta, LV_TEXTAREA_CURSOR_LAST);
   showKb(&p);                                      // focus composer so you can tweak/send
+  composerFocusAfterMenu(p);
 }
 
 static void openMessageActionMenu(int msg_idx) {
@@ -77508,7 +77524,15 @@ static inline void touchScreenBacklight(bool on) {
   // support), which would otherwise fall into the #elif defined(TFT_BL) branch
   // below and digitalWrite a "-1" pin -- must come first. Screen-off is the
   // backlight off AND the ST7796 asleep (touchPanelSleep above).
-  if (on) { touchPanelSleep(false); display.setBrightness(s_brightness_pct); }
+  if (on) {
+    touchPanelSleep(false);
+    // The panel can come out of sleep with a damaged band in its RAM (seen as a
+    // coloured stripe across the lock screen after a message came in while it was
+    // dark). LVGL only repaints what it knows changed, so the band stayed: repaint
+    // all of it, with the light still off, then light it. One full frame, ~40 ms.
+    if (g_lv.ready) { lv_obj_invalidate(lv_scr_act()); lv_refr_now(nullptr); }
+    display.setBrightness(s_brightness_pct);
+  }
   else    { display.setBrightness(0); touchPanelSleep(true); }
 #elif defined(HAS_TDECK_PRO)
 #if defined(HAS_TDECK_MAX)
