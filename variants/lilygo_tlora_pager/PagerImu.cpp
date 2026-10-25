@@ -41,8 +41,11 @@ static void accelCb(uint8_t sensor_id, uint8_t* data, uint32_t len, uint64_t* ts
 static bool imuStart() {
   if (s_tried) return s_ready;
   s_tried = true;
-  // The upload is ~120 KB over the shared bus: run it at 1 MHz as the vendor does
-  // (every chip on this bus accepts Fast-mode Plus), then put the bus back.
+  // The upload is ~120 KB over the shared bus: run it at 1 MHz as LilyGoLib does
+  // (there at boot), then put the bus back. It blocks the loop for 1-2 s, once,
+  // on the first wada.sys.accel() call. The only other Wire user, the notify
+  // task (ES8311/XL9555 around a chime), could hit that window; worst case one
+  // chime's codec writes fail.
   const uint32_t was = Wire.getClock();
   Wire.setClock(1000000UL);
   s_bhy.setFirmware(bosch_firmware_image, bosch_firmware_size, bosch_firmware_type);
@@ -59,8 +62,6 @@ static bool imuStart() {
   return s_ready;
 }
 
-bool pagerImuPresent() { return s_ready; }
-
 bool pagerImuRead(float* x_g, float* y_g, float* z_g) {
   if (!imuStart()) return false;
   const uint32_t now = millis();
@@ -70,7 +71,9 @@ bool pagerImuRead(float* x_g, float* y_g, float* z_g) {
     if (!s_sampling) return false;
   }
   s_bhy.update();                                  // drain the FIFO -> accelCb
-  if (!s_sample_ms || now - s_sample_ms > PAGER_IMU_FRESH_MS) return false;
+  // accelCb stamps with millis() during update(), i.e. after now: compare
+  // against a fresh clock, or a sample from this very call reads as stale.
+  if (!s_sample_ms || millis() - s_sample_ms > PAGER_IMU_FRESH_MS) return false;
   *x_g = s_x; *y_g = s_y; *z_g = s_z;
   return true;
 }

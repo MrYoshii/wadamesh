@@ -6424,13 +6424,17 @@ static void navTipFocusMoved(lv_obj_t* f) {
 }
 
 #if defined(TLORA_PAGER)
-// Scroll every scrolled container under `o` back to its top.
-static void navScrollTreeTop(lv_obj_t* o, int depth) {
-  if (!o || depth > 12) return;
-  if (lv_obj_has_flag(o, LV_OBJ_FLAG_SCROLLABLE) && lv_obj_get_scroll_y(o) > 0)
-    lv_obj_scroll_to_y(o, 0, LV_ANIM_OFF);
-  const uint32_t n = lv_obj_get_child_cnt(o);
-  for (uint32_t i = 0; i < n; ++i) navScrollTreeTop(lv_obj_get_child(o, i), depth + 1);
+// Scroll the containers that hold this page's stops back to their top: the
+// ancestors of every nav stop, up to (not including) the screen/layer. Only the
+// focus scope moves; other tabs' lists and anything without a stop stay put.
+static void navScrollStopsTop() {
+  for (int i = 0; i < s_nav_count && i < kNavMax; ++i) {
+    lv_obj_t* o = s_nav_objs[i] ? lv_obj_get_parent(s_nav_objs[i]) : nullptr;
+    for (int depth = 0; o && lv_obj_get_parent(o) && depth < 12; ++depth, o = lv_obj_get_parent(o)) {
+      if (lv_obj_has_flag(o, LV_OBJ_FLAG_SCROLLABLE) && lv_obj_get_scroll_y(o) > 0)
+        lv_obj_scroll_to_y(o, 0, LV_ANIM_OFF);
+    }
+  }
 }
 #endif
 static void navFocusCb(lv_group_t* g) {
@@ -6476,11 +6480,7 @@ static void navFocusCb(lv_group_t* g) {
     // scrolled down with the later stops: focusing it moved nothing, and whatever
     // sat above the first field (the Signal popup's chart, a page's intro) could
     // not be reached again with the knob.
-    if (s_nav_count > 0 && f == s_nav_objs[0]) {
-      lv_obj_t* root = f;
-      while (lv_obj_get_parent(root) && lv_obj_get_parent(lv_obj_get_parent(root))) root = lv_obj_get_parent(root);
-      navScrollTreeTop(root, 0);
-    }
+    if (s_nav_count > 0 && f == s_nav_objs[0]) navScrollStopsTop();
 #endif
   }
 }
@@ -13231,7 +13231,7 @@ static void toggleLoudAlertsCb(lv_event_t* e) {
 #endif
 
 #if defined(TLORA_PAGER)
-// "Vibrate on keys": a light click per keypress and per knob detent. Cached, since
+// "Vibrate on keys": a short click per keypress and per knob detent. Cached, since
 // it is read on every key; -1 = not loaded from NVS yet.
 static int8_t s_vib_input = -1;
 static inline bool vibInputOn() {
@@ -14485,10 +14485,11 @@ static void openAdvertPage() {
   s_apppage_close = closeAdvertPage;
   statusBarSetTall(true);
   updateGlobalStatusBar();
-#if CAP_ROUND_CORNERS
+#if CAP_ROUND_CORNERS || defined(TLORA_PAGER)
   // The round panel's status bar is one row and never doubles when "tall", so the
   // extra STATUSBAR_H below only left an empty band between the bar and the Home
   // button. The root already starts below the bar.
+  // Same on the Pager, whose bar is always one row (statusBarSetTall).
   const int top = 8;
 #else
   const int top = STATUSBAR_H + 8;   // clear the tall bar's second row, which overlaps the root
@@ -18575,7 +18576,7 @@ static void buildSoundPage() {
     setSwitchRow(c, "Vibrate", "Buzzes for the same messages as the sound below, even with Sound off. "
                  "Do Not Disturb and muted channels stay still.",
                  touchPrefsGetVibrate(), toggleVibrateCb);
-    setSwitchRow(c, "Vibrate on keys", "A light click for each keypress and each turn of the knob.",
+    setSwitchRow(c, "Vibrate on keys", "A short click for each keypress and each turn of the knob.",
                  vibInputOn(), toggleVibrateInputCb);
   }
 #endif
@@ -20648,8 +20649,13 @@ static lv_obj_t* wifiSheetOpenFullscreen(const char* title) {
   lv_obj_set_pos(body, 0, 0);
   lv_obj_set_style_pad_all(body, 12, LV_PART_MAIN);
   // Clear the tall bar's glass lower row (it overlays the top of this sheet,
-  // same as prepSettingsPage's inset on the category pages).
+  // same as prepSettingsPage's inset on the category pages). The Pager's bar is
+  // always one row, so there is no lower row to clear.
+#if defined(TLORA_PAGER)
+  lv_obj_set_style_pad_top(body, 8, LV_PART_MAIN);
+#else
   lv_obj_set_style_pad_top(body, STATUSBAR_H + 8, LV_PART_MAIN);
+#endif
   // Generous bottom padding so the last field/button can scroll clear of the
   // on-screen keyboard (attachSettingsTaEvents scrolls the focused field into view).
   lv_obj_set_style_pad_bottom(body, SC(64), LV_PART_MAIN);
@@ -24526,7 +24532,13 @@ static void batteryLogTrim(fs::FS& fs, uint32_t epoch) {
 
 // Append one sample. Line columns (tab-separated, human-readable):
 // <epoch>\t<YYYY-MM-DD HH:MM>\t<millivolts>\t<percent>\t<cpuMHz>
-static void batteryLogAppend(uint32_t epoch, uint16_t mv, int pct, uint16_t cpu_mhz) {
+// The Pager adds a sixth, <mA>: the gauge's average battery current over the
+// period, + charging / - drawing (other readers stop at the fifth column).
+static void batteryLogAppend(uint32_t epoch, uint16_t mv, int pct, uint16_t cpu_mhz
+#if defined(TLORA_PAGER)
+                             , bool has_ma = false, int ma = 0
+#endif
+                             ) {
   fs::FS& fs = battLogFs();
   if (battLogOnSd()) markSdIo();
   char when[20] = "----------------";
@@ -24534,6 +24546,11 @@ static void batteryLogAppend(uint32_t epoch, uint16_t mv, int pct, uint16_t cpu_
   if (epoch > 1700000000 && localtime_r(&t, &tmv)) strftime(when, sizeof when, "%Y-%m-%d %H:%M", &tmv);
   File af = fs.open(battLogPath(), FILE_APPEND);
   if (!af) { if (battLogOnSd()) sdNoteIoFailure(); return; }
+#if defined(TLORA_PAGER)
+  if (has_ma)
+    af.printf("%lu\t%s\t%u\t%d\t%u\t%d\n", (unsigned long)epoch, when, (unsigned)mv, pct, (unsigned)cpu_mhz, ma);
+  else
+#endif
   af.printf("%lu\t%s\t%u\t%d\t%u\n", (unsigned long)epoch, when, (unsigned)mv, pct, (unsigned)cpu_mhz);
   const size_t size = af.size();
   af.close();
@@ -24545,13 +24562,34 @@ static void batteryLogAppend(uint32_t epoch, uint16_t mv, int pct, uint16_t cpu_
 // first sample waits half a minute, clear of the boot's own work.
 static void batteryLogTick(uint32_t now_ms) {
   static uint32_t s_next_ms = 0;
+#if defined(TLORA_PAGER)
+  // The gauge's current, sampled every 10 s and averaged over the log period, so
+  // a point shows what the period really drew, not whatever the screen was doing
+  // at the instant of logging.
+  static uint32_t s_ma_ms = 0;
+  static int32_t  s_ma_sum = 0;
+  static uint16_t s_ma_n = 0;
+  if (!s_ma_ms || now_ms - s_ma_ms >= 10000u) {
+    s_ma_ms = now_ms ? now_ms : 1;
+    const TLoraPagerBoard::GaugeInfo g = board.getGaugeInfo();
+    if (g.valid) { s_ma_sum += g.current_ma; ++s_ma_n; }
+  }
+#endif
   if (s_next_ms == 0) { s_next_ms = now_ms + 30000u; return; }
   if ((int32_t)(now_ms - s_next_ms) < 0) return;
   s_next_ms = (now_ms ? now_ms : 1) + k_batt_log_period_ms;
   const uint16_t mv = batteryMvSmoothed();
   if (mv == 0) return;                               // no battery reading yet
+#if defined(TLORA_PAGER)
+  const bool has_ma = s_ma_n > 0;
+  const int ma = has_ma ? (int)(s_ma_sum / (int32_t)s_ma_n) : 0;
+  s_ma_sum = 0; s_ma_n = 0;
+  batteryLogAppend((uint32_t)time(nullptr), mv, batteryPercentFromMv(mv),
+                   (uint16_t)getCpuFrequencyMhz(), has_ma, ma);
+#else
   batteryLogAppend((uint32_t)time(nullptr), mv, batteryPercentFromMv(mv),
                    (uint16_t)getCpuFrequencyMhz());
+#endif
   hwBattPush((uint32_t)time(nullptr), mv);   // the Battery widget's last 24 h
 }
 
@@ -24646,7 +24684,22 @@ static void batteryClearCb(lv_event_t* e) {
   if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
   showConfirm(TR("Clear battery history?"), TR("Clear"), batteryLogClearConfirmed);
 }
+#if defined(TLORA_PAGER)
+// The Pager's right-hand series is the logged current draw unless the chip
+// switches it to CPU MHz (one secondary axis, so one or the other).
+static bool s_batt_show_cpu = false;
+#else
 static bool s_batt_show_cpu = true;   // chart: draw the CPU-MHz series (session-scoped)
+#endif
+// Whether the chip by the trash button shows as on: everywhere it is the CPU
+// series' switch; on the Pager it picks the right axis and is always "on".
+static inline bool battSecondaryOn() {
+#if defined(TLORA_PAGER)
+  return true;
+#else
+  return s_batt_show_cpu;
+#endif
+}
 static void batteryCpuToggleCb(lv_event_t* e) {
   if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
   s_batt_show_cpu = !s_batt_show_cpu;
@@ -24754,6 +24807,11 @@ static void openBatteryChartWindow() {
   static uint16_t* mvs  = (uint16_t*)psAlloc(sizeof(uint16_t) * k_max_pts);
   static uint16_t* cpus = (uint16_t*)psAlloc(sizeof(uint16_t) * k_max_pts);
   static uint32_t* eps  = (uint32_t*)psAlloc(sizeof(uint32_t) * k_max_pts);
+#if defined(TLORA_PAGER)
+  static int16_t*  mas  = (int16_t*)psAlloc(sizeof(int16_t) * k_max_pts);   // draw, mA (+ = drawing)
+  static const int16_t k_ma_none = INT16_MIN;                               // line without the column
+  const bool ma_ok = mas != nullptr;
+#endif
   int n = 0;
   if (mvs && cpus && eps) {   // null only under extreme OOM -> n stays 0 -> the empty-state below
     if (battLogOnSd()) markSdIo();
@@ -24775,6 +24833,15 @@ static void openBatteryChartWindow() {
         eps[slot]  = (uint32_t)strtoul(ln, nullptr, 10);   // first column = epoch
         mvs[slot]  = (uint16_t)mv;
         cpus[slot] = (uint16_t)(t4 ? atoi(t4 + 1) : 0);
+#if defined(TLORA_PAGER)
+        if (ma_ok) {
+          char* t5 = t4 ? strchr(t4 + 1, '\t') : nullptr;
+          int d = t5 ? -atoi(t5 + 1) : 0;                   // logged + charging -> draw
+          if (d < -3000) d = -3000;
+          if (d >  3000) d =  3000;
+          mas[slot] = t5 ? (int16_t)d : k_ma_none;
+        }
+#endif
         ++total;
       }
       rf.close();
@@ -24784,6 +24851,9 @@ static void openBatteryChartWindow() {
         std::rotate(eps, eps + head, eps + k_max_pts);
         std::rotate(mvs, mvs + head, mvs + k_max_pts);
         std::rotate(cpus, cpus + head, cpus + k_max_pts);
+#if defined(TLORA_PAGER)
+        if (ma_ok) std::rotate(mas, mas + head, mas + k_max_pts);
+#endif
       }
       // Only the day before the newest sample, as the writer used to keep it.
       int first = 0;
@@ -24796,6 +24866,9 @@ static void openBatteryChartWindow() {
         memmove(eps, eps + first, sizeof(uint32_t) * (size_t)(n - first));
         memmove(mvs, mvs + first, sizeof(uint16_t) * (size_t)(n - first));
         memmove(cpus, cpus + first, sizeof(uint16_t) * (size_t)(n - first));
+#if defined(TLORA_PAGER)
+        if (ma_ok) memmove(mas, mas + first, sizeof(int16_t) * (size_t)(n - first));
+#endif
         n -= first;
       }
     }
@@ -24869,12 +24942,42 @@ static void openBatteryChartWindow() {
     lv_chart_set_axis_tick(chart, LV_CHART_AXIS_SECONDARY_Y, 4, 0, 4, 1, true, 40);
     cser = lv_chart_add_series(chart, lv_color_hex(0x4A5256), LV_CHART_AXIS_SECONDARY_Y); // grey CPU (RF-monitor noise-floor tone)
   }
+#if defined(TLORA_PAGER)
+  // Current draw on the right axis (amber), from the logged gauge averages: what
+  // the screen, Wi-Fi and the radio cost over the day. Below 0 = charging.
+  lv_chart_series_t* aser = nullptr;
+  int ma_lo = 0, ma_hi = 0, ma_last = 0;
+  bool ma_any = false;
+  if (!s_batt_show_cpu && ma_ok) {
+    for (int i = 0; i < n; ++i) {
+      if (mas[i] == k_ma_none) continue;
+      if (!ma_any || mas[i] < ma_lo) ma_lo = mas[i];
+      if (!ma_any || mas[i] > ma_hi) ma_hi = mas[i];
+      ma_last = mas[i];
+      ma_any = true;
+    }
+    if (ma_any) {
+      // Four labels on round numbers: three equal steps of a multiple of 50 mA,
+      // starting at 0 or (charging in the window) at a round negative value.
+      ma_lo = ma_lo < 0 ? -(((-ma_lo) + 49) / 50) * 50 : 0;
+      const int span = LV_MAX(ma_hi, 50) - ma_lo;
+      const int step = ((span + 149) / 150) * 50;
+      ma_hi = ma_lo + 3 * step;
+      lv_chart_set_range(chart, LV_CHART_AXIS_SECONDARY_Y, ma_lo, ma_hi);
+      lv_chart_set_axis_tick(chart, LV_CHART_AXIS_SECONDARY_Y, 4, 0, 4, 1, true, 40);
+      aser = lv_chart_add_series(chart, lv_color_hex(0xF5A623), LV_CHART_AXIS_SECONDARY_Y);
+    }
+  }
+#endif
   for (int i = 0; i < n; ++i) {
     lv_coord_t v = (lv_coord_t)mvs[i];
     if (v > y_top) v = y_top;             // charging spike -> ride the top line
     if (v < y_bot) v = y_bot;
     lv_chart_set_next_value(chart, vser, v);
     if (cser) lv_chart_set_next_value(chart, cser, cpus[i] > 0 ? (lv_coord_t)cpus[i] : LV_CHART_POINT_NONE);
+#if defined(TLORA_PAGER)
+    if (aser) lv_chart_set_next_value(chart, aser, mas[i] != k_ma_none ? (lv_coord_t)mas[i] : LV_CHART_POINT_NONE);
+#endif
   }
 
   // Time labels on the X (the tick mechanism counts points, not hours).
@@ -24916,6 +25019,13 @@ static void openBatteryChartWindow() {
              (unsigned)(mvs[n-1] / 1000), (unsigned)((mvs[n-1] % 1000) / 10),
              (unsigned)(y_top / 1000), (unsigned)((y_top % 1000) / 100),
              (unsigned)getCpuFrequencyMhz());
+#if defined(TLORA_PAGER)
+  else if (ma_any)
+    snprintf(sub, sizeof sub, "now %u.%02u V   %s %d mA",
+             (unsigned)(mvs[n-1] / 1000), (unsigned)((mvs[n-1] % 1000) / 10),
+             ma_last < 0 ? TR("last 5 min charging") : TR("last 5 min drawing"),
+             ma_last < 0 ? -ma_last : ma_last);
+#endif
   else
     snprintf(sub, sizeof sub, "now %u.%02u V (full %u.%01u)",
              (unsigned)(mvs[n-1] / 1000), (unsigned)((mvs[n-1] % 1000) / 10),
@@ -24953,14 +25063,18 @@ static void openBatteryChartWindow() {
   lv_obj_align(cpub, LV_ALIGN_TOP_RIGHT, -36, row_y);
   lv_obj_set_style_pad_all(cpub, 0, LV_PART_MAIN);
   lv_obj_set_style_bg_color(cpub,
-      lv_color_hex(s_batt_show_cpu ? themeRole(0x4A5256, COLOR_CONTROL)
-                                   : themeRole(0x3A3D40, COLOR_CONTROL_DISABLED)), LV_PART_MAIN);
+      lv_color_hex(battSecondaryOn() ? themeRole(0x4A5256, COLOR_CONTROL)
+                                     : themeRole(0x3A3D40, COLOR_CONTROL_DISABLED)), LV_PART_MAIN);
   lv_obj_add_event_cb(cpub, batteryCpuToggleCb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t* cpul = lv_label_create(cpub);
+#if defined(TLORA_PAGER)
+  lv_label_set_text(cpul, s_batt_show_cpu ? "CPU" : "mA");   // what the right axis shows; tap swaps
+#else
   lv_label_set_text(cpul, "CPU");
+#endif
   lv_obj_set_style_text_font(cpul, &g_font_12, LV_PART_MAIN);
   lv_obj_set_style_text_color(cpul,
-      lv_color_hex(s_batt_show_cpu ? themeRole(0xFFFFFF, COLOR_TEXT) : COLOR_SUB), LV_PART_MAIN);
+      lv_color_hex(battSecondaryOn() ? themeRole(0xFFFFFF, COLOR_TEXT) : COLOR_SUB), LV_PART_MAIN);
   lv_obj_center(cpul);
 
   // ---- Idle power-save stats (snapshot mirror of the Lock-settings diag; the
@@ -30177,7 +30291,11 @@ static void openDiscoverPage() {
   s_apppage_close = closeDiscoverPage;
   statusBarSetTall(true);
   updateGlobalStatusBar();
+#if defined(TLORA_PAGER)
+  const int top = 8;                    // one-row bar: nothing overlaps the root
+#else
   const int top = STATUSBAR_H + 8;
+#endif
 
   s_discover_status = lv_label_create(s_discover_root);
   lv_label_set_text(s_discover_status, TR("Scanning\xE2\x80\xA6"));
@@ -32598,7 +32716,11 @@ static void openSpectrumPage() {
   s_apppage_close = closeSpectrumPage;
   statusBarSetTall(true);
   updateGlobalStatusBar();
+#if defined(TLORA_PAGER)
+  const int top = 8;                    // one-row bar: nothing overlaps the root
+#else
   const int top = STATUSBAR_H + 8;
+#endif
   // Top of the spectrum itself (RBW/span line, chart, waterfall). The peak readout
   // stays on the `top` line. On the narrow P4 portrait panel the right-aligned peak ran
   // over the RBW/span line, and the tall panel has room to spare, so the spectrum
@@ -53750,8 +53872,9 @@ static void powerOffNow() {
 #endif
   delay(900);
 #if defined(TLORA_PAGER)
-  // "Power off" is deep sleep on the Pager, so its XL9555 (and SD_EN) remain
-  // alive. Pause new tile work, let any in-flight SD owner finish, unmount FAT,
+  // "Power off" on USB is deep sleep on the Pager (on battery it is ship mode,
+  // further down, with deep sleep as the fallback), so its XL9555 (and SD_EN)
+  // can remain alive. Pause new tile work, let any in-flight SD owner finish, unmount FAT,
   // then remove card power so removal/reinsertion while asleep is truly cold.
   tileBackendSwapTryBegin();
   const uint32_t sd_stop_deadline = millis() + 3000;
@@ -62568,8 +62691,8 @@ static void hwTogglesUpdate(int i) {
 }
 
 // ---- Chat (one chat pinned to Home) ---------------------------------------------------------
-// opt 1 = a channel, kept by a hash of its name; 0 = a contact, by its key prefix.
-// opt: 0 a direct chat, 1 a channel (both pinned by the key in x), 2 whichever
+// opt: 0 a direct chat (kept by the contact's key prefix), 1 a channel (by a hash
+// of its name), both in x; 2 whichever
 // conversation was active last (the Pager's default Home row: no setup needed).
 static constexpr uint8_t kHwChatLatest = 2;
 static int hwChatThread(const HwRec& r) {
@@ -76380,6 +76503,26 @@ static inline void touchScreenBacklight(bool on) {
 // stops listening to the mesh — we just stop burning 240 MHz to render nothing.
 // Restored to 240 MHz on wake so tile decode / rendering stays fast. Only
 // switches when the target changes (the call is a hard DFS switch).
+#if defined(TLORA_PAGER) && !defined(WADA_WEB)
+// A joined Wi-Fi is the Pager's largest draw after the backlight: with the screen
+// dark and no app connected, let the modem sleep through more beacons (maximum
+// modem sleep: it wakes every listen interval instead of every DTIM). Still
+// associated, so the web client and the app reconnect as before, a beat slower.
+// Waking the screen, or a client connecting, returns it to the normal setting:
+// setCpuForScreen() passes screen changes in, the pager loop calls it with -1
+// about once a second to catch clients coming and going.
+// (Never WIFI_PS_NONE: illegal while Bluetooth runs, see main.cpp.)
+static void pagerWifiPsUpdate(int screen_on) {
+  static bool s_screen_on = true;
+  static int8_t s_applied = -1;          // 1 = MAX_MODEM, 0 = MIN_MODEM, -1 = not set
+  if (screen_on >= 0) s_screen_on = screen_on != 0;
+  if (WiFi.getMode() == WIFI_OFF) { s_applied = -1; return; }
+  const int8_t deep = (!s_screen_on && the_mesh.getProtoNumClients() == 0) ? 1 : 0;
+  if (deep == s_applied) return;
+  if (esp_wifi_set_ps(deep ? WIFI_PS_MAX_MODEM : WIFI_PS_MIN_MODEM) == ESP_OK) s_applied = deep;
+}
+#endif
+
 static void setCpuForScreen(bool screen_on) {
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
   // The P4's Arduino HAL only accepts 360 MHz (240/80 log a "could not be set" error every screen
@@ -76391,18 +76534,9 @@ static void setCpuForScreen(bool screen_on) {
   if (want == s_cur_mhz) return;
   setCpuFrequencyMhz(want);
   s_cur_mhz = want;
-#if defined(TLORA_PAGER) && !defined(WADA_WEB)
-  // A joined Wi-Fi is the Pager's largest draw after the backlight: with the screen
-  // dark and no app connected, let the modem sleep through more beacons (maximum
-  // modem sleep: it wakes every listen interval instead of every DTIM). Still
-  // associated, so the web client and the app reconnect as before, a beat slower.
-  // Waking the screen, or a connected client, returns it to the normal setting.
-  // (Never WIFI_PS_NONE: illegal while Bluetooth runs, see main.cpp.)
-  if (WiFi.getMode() != WIFI_OFF) {
-    const bool deep = !screen_on && the_mesh.getProtoNumClients() == 0;
-    esp_wifi_set_ps(deep ? WIFI_PS_MAX_MODEM : WIFI_PS_MIN_MODEM);
-  }
 #endif
+#if defined(TLORA_PAGER) && !defined(WADA_WEB)
+  pagerWifiPsUpdate(screen_on);
 #endif
 }
 #else
@@ -80357,6 +80491,12 @@ void UITask::loop() {
 #if defined(TLORA_PAGER)
   pagerHapticsIdleTick();   // vibration motor back to standby once its pattern has run out
   pagerImuIdleTick();       // and the accelerometer off once no app is reading it
+#if !defined(WADA_WEB)
+  {
+    static uint32_t s_wifi_ps_ms = 0;
+    if (now - s_wifi_ps_ms >= 1000) { s_wifi_ps_ms = now; pagerWifiPsUpdate(-1); }
+  }
+#endif
 #endif
 #elif defined(HAS_M9_KEYBOARD)
   // Own the stall buckets for everything a keypress triggers. The "ui:input"

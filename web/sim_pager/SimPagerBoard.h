@@ -32,7 +32,6 @@ public:
   }
   int  externalPowerPresent() { return 0; }
   ChargeState chargeState() { return ChargeState::NotCharging; }
-  bool chargerPresent() const { return true; }
   bool enterShipMode() { return false; }
   SdCardState sdCardState() { return SdCardState::Absent; }
   bool sdCardPresent() { return false; }

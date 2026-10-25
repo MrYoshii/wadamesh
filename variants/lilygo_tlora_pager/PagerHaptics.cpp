@@ -58,6 +58,8 @@ void pagerHapticsPlay(PagerHaptic kind) {
     case PagerHaptic::Tick:    seq = k_tick; n = sizeof k_tick; break;
   }
   s_drv.setMode(SensorDRV2605::MODE_INTTRIG);   // wake, internal trigger
+  s_drv.stop();      // GO=1 again does not restart a running sequence, and the
+                     // sequencer reads the slots live: stop it before rewriting
   for (size_t i = 0; i < n && i < 8; ++i) s_drv.setWaveform((uint8_t)i, seq[i]);
   s_drv.run();
   s_awake = true;

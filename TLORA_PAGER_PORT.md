@@ -55,16 +55,17 @@ The chips that had power but no driver now do something:
 
 | Chip | What it does now | Where |
 |---|---|---|
-| **DRV2605** haptic driver (0x5A) | Vibrates for message / DM / @mention (own patterns), following the per-kind sound switches, channel mutes and DND but NOT the Sound master switch. Optional light click per key and knob detent. Settings > Sound > Vibration. Parked in standby between patterns. Driver: SensorLib `SensorDRV2605`. | `PagerHaptics.*`, `UITask.cpp` |
-| **BQ25896** charger (0x6B) | Charging icon from the charger's input status. The gauge reads the *cell*, which never rises above the charge target, so the shared voltage heuristic could never show charging on this board. Driver: XPowersLib `PowersBQ25896` (its init also turns the charger's I2C watchdog off). | `TLoraPagerBoard::externalPowerPresent()`, `batteryIsCharging()` |
+| **DRV2605** haptic driver (0x5A) | Vibrates for message / DM / @mention (own patterns), following the per-kind sound switches, channel mutes and DND but NOT the Sound master switch. Optional short click per key and knob detent. Settings > Sound > Vibration. Parked in standby between patterns. Driver: SensorLib `SensorDRV2605`. | `PagerHaptics.*`, `UITask.cpp` |
+| **BQ25896** charger (0x6B) | Charging icon from the charger's input status. The gauge reads the *cell*, which never rises above the charge target, so the shared voltage heuristic could never show charging on this board. Driver: XPowersLib `PowersBQ25896` (its init also turns the charger's I2C watchdog off). Charge limits set to LilyGoLib's for this pack: 704 mA, 4288 mV (chip default is 2 A). | `TLoraPagerBoard::externalPowerPresent()`, `batteryIsCharging()` |
 | **BQ25896** ship mode | Power off on battery opens the battery switch (vendor figure ~26 µA vs ~530 µA deep sleep); the power key (QON) switches it back on. On USB it keeps the BOOT-wake deep sleep. | `TLoraPagerBoard::enterShipMode()`, `powerOffNow()` |
-| **BQ27220** gauge | Battery % from the gauge's StateOfCharge (as on the T-Display P4, #273). Design/full capacity set once to the fitted 1500 mAh pack, as LilyGoLib does; a refusal is recorded in NVS (`pagerhw/gauge_fail`) so it is not retried every boot. | `pagerConfigureGauge()`, `batteryPercentFromMv()` |
+| **BQ27220** gauge | Battery % from the gauge's StateOfCharge (as on the T-Display P4, #273). Design/full capacity set once to the fitted 1500 mAh pack, as LilyGoLib does; each attempt is recorded in NVS (`pagerhw/gauge_try`) so it is not retried every boot. The battery popup shows the live current/power, mAh and time left/to full, temperature, cycles and health; the 24 h chart adds the 5-min average current (right axis, `mA` chip swaps it for CPU MHz), logged as a sixth column. | `pagerConfigureGauge()`, `batteryPercentFromMv()`, `batteryGaugeBlock()` |
 | **BHI260AP** IMU (0x28) | `wada.sys.accel()` / `caps().accel` for Lua apps. The hub firmware (Klio image, ~120 KB) uploads on the first read, not at boot; the accelerometer stops 3 s after the last read. Axes remapped by the hub (`BOTTOM_LAYER_TOP_LEFT_CORNER`, vendor). | `PagerImu.*`, `luaHostAccel()` |
 
 Power: with the screen dark and no app connected, a joined Wi-Fi drops to
-maximum modem sleep (`esp_wifi_set_ps(WIFI_PS_MAX_MODEM)`, `setCpuForScreen`),
-back to the normal minimum modem sleep on wake or when a client connects.
-Measured gain still to be confirmed on hardware.
+maximum modem sleep (`esp_wifi_set_ps(WIFI_PS_MAX_MODEM)`, `pagerWifiPsUpdate()`),
+back to the normal minimum modem sleep on wake or when a client connects
+(checked once a second). Measured on the SX1262 unit with the gauge, Wi-Fi
+joined: about 350 mA with the screen on, 65-75 mA with it off.
 
 Still not driven: the **ST25R3916 NFC** reader (needs ST's RFAL stack) and
 the codec's microphone input.

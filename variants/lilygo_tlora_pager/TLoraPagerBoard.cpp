@@ -17,18 +17,18 @@ static PowersBQ25896 s_charger;
 // Programs the gauge's design/full-charge capacity once, the way LilyGoLib does
 // for this board. The gauge sits on the battery, so the setting outlives
 // reflashes and power-off; afterwards the design-capacity check alone skips this.
-// A failed attempt is recorded so a gauge that refuses (sealed with a custom key)
-// is not put through config-update mode again on every boot.
+// Every attempt is recorded (ok or not), so a gauge that accepts the write but
+// reads back something else, or refuses it (sealed with a custom key), is not put
+// through config-update mode again on every boot.
 static void pagerConfigureGauge(GaugeBQ27220& gauge) {
   if (!gauge.refresh()) return;                 // not answering: try next boot
   if (gauge.getDesignCapacity() == PAGER_GAUGE_DESIGN_MAH) return;
   Preferences p;
   if (!p.begin("pagerhw", false)) return;
-  const uint8_t failed = p.getUChar("gauge_fail", 0);
-  if (!failed) {
+  if (!p.getUChar("gauge_try", 0)) {
     const bool ok = gauge.setNewCapacity(PAGER_GAUGE_DESIGN_MAH, PAGER_GAUGE_DESIGN_MAH);
     Serial.printf("[BOOT] bq27220 capacity -> %u mAh %s\n", PAGER_GAUGE_DESIGN_MAH, ok ? "ok" : "FAILED");
-    if (!ok) p.putUChar("gauge_fail", 1);
+    p.putUChar("gauge_try", 1);
   }
   p.end();
 }
@@ -136,12 +136,15 @@ void TLoraPagerBoard::begin() {
   gauge.begin(Wire);
   pagerConfigureGauge(gauge);
 
-  // BQ25896 charger: presence and status only. XPowersLib's init checks the chip
-  // id and switches the I2C watchdog off (otherwise every expiry resets the chip
-  // to defaults); the charge settings themselves stay at the chip's defaults. We
-  // read the input/charge status and use the battery switch for power-off.
+  // BQ25896 charger. XPowersLib's init checks the chip id and switches the I2C
+  // watchdog off, so what is set here stays set (with the watchdog on, every
+  // expiry put the chip back to its defaults). The chip default charge current is
+  // 2 A, too much for the 1500 mAh pack: use LilyGoLib's figures for this board,
+  // 704 mA (under C/2) up to 4288 mV.
   charger_ready_ = s_charger.init(Wire, SDA, SCL, PAGER_BQ25896_ADDR);
   if (charger_ready_) {
+    s_charger.setChargeTargetVoltage(4288);
+    s_charger.setChargerConstantCurr(704);
     const int stat = s_charger.readRegister(0x0B);
     if (stat >= 0) sys_stat_ = (uint8_t)stat;
   }
@@ -244,7 +247,10 @@ void TLoraPagerBoard::refreshGauge() {
   const uint32_t now = millis();
   if (batt_ms_ && now - batt_ms_ < 2000) return;
   batt_ms_ = now ? now : 1;
-  if (!gauge.refresh()) return;                  // keep the last good values
+  if (!gauge.refresh()) {                        // keep the last good voltage/SOC, but do
+    gauge_info_.valid = false;                   // not show stale currents as live
+    return;
+  }
   const uint16_t mv = gauge.getVoltage();
   if (mv >= 2500 && mv <= 4600) batt_mv_ = mv;
   const uint16_t soc = gauge.getStateOfCharge();

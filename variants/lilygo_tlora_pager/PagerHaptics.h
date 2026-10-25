@@ -16,7 +16,7 @@ enum class PagerHaptic : uint8_t {
   Message,   // one strong buzz
   Direct,    // two buzzes
   Mention,   // three short buzzes
-  Tick,      // a light click, for key/encoder feedback
+  Tick,      // one strong click (ROM effect 1), for key/encoder feedback
 };
 
 /** Probe + configure. Safe to call when the chip is absent: every other call is
@@ -26,7 +26,7 @@ void pagerHapticsBegin();
 /** True once the chip answered with a DRV260x id and took the configuration. */
 bool pagerHapticsPresent();
 
-/** Start a pattern (replaces one still playing). Non-blocking. */
+/** Start a pattern, stopping one still playing. Non-blocking. */
 void pagerHapticsPlay(PagerHaptic kind);
 
 /** Call periodically (cheap: one comparison until a pattern has run out). Puts

@@ -148,7 +148,6 @@ public:
   // for a second; the status bar asks several times a second.
   int  externalPowerPresent();
   ChargeState chargeState();
-  bool chargerPresent() const { return charger_ready_; }
 
   // Real power-off: opens the charger's battery switch (BQ25896 ship mode,
   // BATFET_DIS), which takes the whole board down to the charger's own leakage,

@@ -17,9 +17,6 @@
 
 #if defined(TLORA_PAGER) && defined(ESP32)
 
-/** True once the firmware is running (after the first successful read). */
-bool pagerImuPresent();
-
 /** Latest acceleration in g. The first call uploads the hub firmware (blocks
  *  for a second or two, once per boot) and starts the accelerometer; later
  *  calls are cheap. False = no chip, upload failed, or nothing fresh yet. */
