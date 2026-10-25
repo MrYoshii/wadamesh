@@ -1,7 +1,7 @@
 # wadamesh language file
 # canonical source - translators: edit this file and PR it
 # code: de
-# ver: 32
+# ver: 33
 # name: Deutsch
 # base: de
  (device behind)	 (Gerät geht nach)
@@ -2296,3 +2296,13 @@ Lying face down, the screen goes off and the Pager stays silent (no sound, no vi
 Starting the motion sensor…	Bewegungssensor startet…
 Wake when picked up	Beim Hochheben aufwecken
 Lifting the Pager off the table turns the screen on (a locked Pager shows its lock screen). Only after it lay still, so it stays dark in a bag or pocket.	Hebst du den Pager vom Tisch, geht der Bildschirm an (gesperrt zeigt er den Sperrbildschirm). Nur wenn er vorher ruhig lag, damit er in Tasche oder Hosentasche dunkel bleibt.
+Battery pack	Akku
+Capacity (mAh)	Kapazität (mAh)
+LilyGo fits 1500 mAh. Change it only for a different pack.	LilyGo verbaut 1500 mAh. Nur für einen anderen Akku ändern.
+Apply to the fuel gauge	In den Akku-Chip übernehmen
+Back to 1500 mAh	Zurück auf 1500 mAh
+Fuel gauge set. It relearns the pack over the next charges.	Akku-Chip gesetzt. Er lernt den Akku über die nächsten Ladungen neu.
+The fuel gauge did not take the new capacity	Der Akku-Chip hat die neue Kapazität nicht übernommen
+The fuel gauge is already set to this	Der Akku-Chip ist schon so eingestellt
+Set the battery to %u mAh?\nOnly if that is the pack fitted. The percentage and time left are recalculated and settle over the next full charge.	Akku auf %u mAh setzen?\nNur wenn dieser Akku verbaut ist. Prozent und Restzeit werden neu berechnet und pendeln sich über die nächste volle Ladung ein.
+%u / %u mAh · %s left at your usage	%u / %u mAh · noch %s bei deiner Nutzung
