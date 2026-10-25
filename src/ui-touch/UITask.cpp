@@ -1,6 +1,7 @@
 #include "UITask.h"
 #include "TouchSleep.h"
 #include "ChatHashtag.h"
+#include <climits>         // INT_MAX (glibc does not pull it in transitively, macOS/ESP-IDF do)
 
 #if defined(WADA_WEB)
   #include "WebMesh.h"     // web/mesh: the MyMesh stand-in (the UI's compile-time mesh contract)
@@ -2646,6 +2647,12 @@ static inline lv_coord_t statusBarCurH() { return s_statusbar_tall ? (lv_coord_t
 static void r8ResizeContentBelowStatusBar(lv_coord_t top);
 #endif
 static void statusBarSetTall(bool tall) {
+#if defined(TLORA_PAGER)
+  // 222 px tall: the doubled bar cost settings and tool pages a fifth of the screen
+  // for a title. Their "‹ Title" shares the one row with the clock instead, as on the
+  // round panel and in an open chat on this board.
+  tall = false;
+#endif
   s_statusbar_tall = tall;
   if (g_statusbar.root) lv_obj_set_height(g_statusbar.root, statusBarCurH());
 #if defined(HELTEC_LORA_V4_R8)
@@ -41658,6 +41665,9 @@ static void openSettingsCategory(int cat) {
 #if defined(HELTEC_LORA_V4_R8)
   const lv_coord_t settings_top = statusBarCurH();
   const lv_coord_t settings_pad_top = 8;
+#elif defined(TLORA_PAGER)
+  const lv_coord_t settings_top = STATUSBAR_H;   // one-row bar: no glass row to clear
+  const lv_coord_t settings_pad_top = 4;
 #else
   const lv_coord_t settings_top = STATUSBAR_H;
   const lv_coord_t settings_pad_top = STATUSBAR_H + 8;
@@ -45990,8 +46000,11 @@ static void refreshChatList(LvChatPanel& p) {
     // settings are a long-press away; there is no gear on the row. Compact rows
     // keep one line: name, time, count.
 #if defined(TLORA_PAGER)
-    const lv_coord_t kRowH = compact_rows ? (lv_coord_t)(lv_font_get_line_height(&g_font_14) + 14)
-                                          : LV_MAX((lv_coord_t)48, (lv_coord_t)(lv_font_get_line_height(&g_font_14) + lv_font_get_line_height(&g_font_12) + 14));
+    // The name and preview boxes sit 2 px in from the row's edges (kNameY/kPrevB), so
+    // 6 px of slack is all two lines need; the 14 it had left an empty band between
+    // them and kept the list to three and a half rows on the 222-px panel.
+    const lv_coord_t kRowH = compact_rows ? (lv_coord_t)(lv_font_get_line_height(&g_font_14) + 10)
+                                          : LV_MAX((lv_coord_t)40, (lv_coord_t)(lv_font_get_line_height(&g_font_14) + lv_font_get_line_height(&g_font_12) + 6));
 #else
     // 38 px and a 2 px gap: four rows under the header on a 320x240 board. Bigger
     // text grows the row to hold its two lines.
@@ -58954,7 +58967,7 @@ static void updateGlobalStatusBar() {
   const bool inbox_overview = (getActiveTab() == CHAT_INBOX_TAB_INDEX) && !chat_open && (s_settings_open_cat < 0) && !s_apppage_title;
   {
 #if defined(TLORA_PAGER)
-    const bool want_tall = (s_settings_open_cat >= 0) || (s_apppage_title && !s_apppage_slim);
+    const bool want_tall = false;   // one row in every state (see statusBarSetTall)
 #else
     // The Chats overview stays one row: its actions live in the page's own header now.
     const bool want_tall = (s_settings_open_cat >= 0) || (s_apppage_title && !s_apppage_slim) || chat_open;
@@ -59869,6 +59882,14 @@ static const HwPresetItem kHwPresetGlance[] = {
   { HWK_CLOCK, HWS_M, 0, 0 }, { HWK_BATTERY, HWS_S, 0, HWK_SYSTEM }, { HWK_UNREAD, HWS_S, 0, 0 },
   { HWK_RADIO, HWS_M, 0, 0 }, { HWK_GPS, HWS_S, 0, HWK_SIGNAL },     { HWK_ADVERT, HWS_S, 0, 0 },
   { HWK_HEARD, HWS_M, 0, 0 }, { HWK_LINKS, HWS_S, 0, HWK_SYSTEM },   { HWK_APP, HWS_S, HW_APP_DRAWER, 0 },
+#if defined(TLORA_PAGER)
+  // The Pager's grid is six by three at its default text size, and the nine above
+  // fill two rows: the bottom third of Home stood empty. A pager is for reading
+  // messages at a glance, so the third row is the latest conversation, then the
+  // nodes heard directly and the link quality. (A preset only lands where it fits:
+  // at the larger text sizes the grid is two rows and these are left out.)
+  { HWK_CHAT, HWS_M, 2 /* kHwChatLatest */, 0 }, { HWK_NEAREST, HWS_M, 0, 0 }, { HWK_SIGNAL, HWS_M, 0, 0 },
+#endif
 };
 static const HwPresetItem kHwPresetCommander[] = {
   { HWK_LINKS, HWS_M, 0, HWK_SYSTEM },  { HWK_UNREAD, HWS_S, 0, 0 },  { HWK_ADVERT, HWS_S, 0, 0 },
@@ -62325,8 +62346,20 @@ static void hwTogglesUpdate(int i) {
 
 // ---- Chat (one chat pinned to Home) ---------------------------------------------------------
 // opt 1 = a channel, kept by a hash of its name; 0 = a contact, by its key prefix.
+// opt: 0 a direct chat, 1 a channel (both pinned by the key in x), 2 whichever
+// conversation was active last (the Pager's default Home row: no setup needed).
+static constexpr uint8_t kHwChatLatest = 2;
 static int hwChatThread(const HwRec& r) {
   if (!g_lv.task) return -1;
+  if (r.opt == kHwChatLatest) {
+    int best = -1; uint32_t best_ts = 0;
+    for (int t = 0; t < UITask::MAX_UI_THREADS; ++t) {
+      bool ch; uint16_t un; uint32_t ts; char nm[4];
+      if (!g_lv.task->getThreadInfo(t, ch, un, ts, nm, sizeof nm)) continue;
+      if (best < 0 || ts > best_ts) { best = t; best_ts = ts; }
+    }
+    return best;
+  }
   for (int t = 0; t < UITask::MAX_UI_THREADS; ++t) {
     bool ch; uint16_t un; uint32_t ts; char nm[UITask::MAX_THREAD_NAME + 1];
     if (!g_lv.task->getThreadInfo(t, ch, un, ts, nm, sizeof nm)) continue;
@@ -62342,8 +62375,9 @@ static int hwChatThread(const HwRec& r) {
 static void hwChatBuild(int i) {
   HwInst& w = hwI(i);
   const bool ch = hwR(i).opt == 1;
-  if (w.size == HWS_S) { hwStatBuild(i, ch ? UI_ICON_HASH : UI_ICON_USER, COLOR_HUE[HUE_MSG]); return; }
-  hwCardBuild(i, ch ? UI_ICON_HASH : UI_ICON_USER, COLOR_HUE[HUE_MSG], 0xFF);
+  const char* icon = hwR(i).opt == kHwChatLatest ? UI_ICON_MESSAGE_SQUARE_TEXT : (ch ? UI_ICON_HASH : UI_ICON_USER);
+  if (w.size == HWS_S) { hwStatBuild(i, icon, COLOR_HUE[HUE_MSG]); return; }
+  hwCardBuild(i, icon, COLOR_HUE[HUE_MSG], 0xFF);
   if (w.size == HWS_L) hwListBuild(i);   // the latest messages, as many as fit
 }
 static void hwChatUpdate(int i) {
@@ -62401,7 +62435,13 @@ static void hwChatUpdate(int i) {
 static void hwChatTap(int i, lv_event_t*) {
   const int t = hwChatThread(hwR(i));
   goToTab(CHAT_INBOX_TAB_INDEX);
-  if (t >= 0) openThreadDetailByIdx(t, hwR(i).opt == 1);
+  if (t < 0) return;
+  bool ch = hwR(i).opt == 1;
+  if (hwR(i).opt == kHwChatLatest && g_lv.task) {   // the channel flag is the thread's own
+    uint16_t un; uint32_t ts; char nm[4];
+    g_lv.task->getThreadInfo(t, ch, un, ts, nm, sizeof nm);
+  }
+  openThreadDetailByIdx(t, ch);
 }
 
 // ---- Mentions -------------------------------------------------------------------------
@@ -65209,6 +65249,19 @@ static void themeTokensFromGlobals(ThemeTokens& t) {
 
 // MORE COLORS! (in its style) and Taste the rainbow, at boot after the mode and the
 // accent. Rainbow implies MORE COLORS!.
+#if defined(TLORA_PAGER)
+// The Pager's small IPS panel is read at arm's length, often outdoors, and most of
+// its surfaces are glass over the aurora: the night palette's tertiary grey (section
+// names, row values like "Regular") and the off-switch track all but vanished there.
+// Lift them towards the next brighter role, night only (day and the high-contrast
+// palettes are already dark-on-light or maximal).
+static void pagerLiftContrast() {
+  if (s_theme_day || s_theme_high_contrast) return;
+  COLOR_TERTIARY = rgbMix(COLOR_TERTIARY, COLOR_SUB, 150);
+  COLOR_SUB      = rgbMix(COLOR_SUB, COLOR_TEXT, 70);
+  COLOR_TRACK    = rgbMix(COLOR_TRACK, COLOR_SUB, 80);
+}
+#endif
 static void applyColorLook(bool more, uint8_t style, bool rainbow) {
 #if defined(HAS_TDECK_PRO)
   more = rainbow = false;
@@ -65224,7 +65277,13 @@ static void applyColorLook(bool more, uint8_t style, bool rainbow) {
   memcpy(COLOR_HUE, t.hue, sizeof COLOR_HUE);
   COLOR_LINK = t.link;
   s_look_tint = t.tint;
-  if (!more) return;
+  if (!more) {
+#if defined(TLORA_PAGER)
+    pagerLiftContrast();
+    themeStylesInvalidate();
+#endif
+    return;
+  }
   COLOR_BG = t.bg; COLOR_PANEL = t.panel; COLOR_CONTROL = t.control; COLOR_CONTROL_PRESSED = t.control_pressed;
   COLOR_FIELD = t.field; COLOR_BORDER = t.border; COLOR_RAISED = t.raised; COLOR_HAIR = t.hair; COLOR_TRACK = t.track;
   COLOR_TEXT = t.text; COLOR_SUB = t.sub; COLOR_TERTIARY = t.tertiary; COLOR_SECONDARY_ACTION = t.secondary_action;
@@ -65247,6 +65306,9 @@ static void applyColorLook(bool more, uint8_t style, bool rainbow) {
   COLOR_STATUS_OK = COLOR_GLOW;
   COLOR_STATUS_OK_PRESSED = COLOR_ACCENT_PRESS;
   COLOR_ON_STATUS_OK = COLOR_ON_GLOW;
+#if defined(TLORA_PAGER)
+  pagerLiftContrast();
+#endif
   themeStylesInvalidate();
 }
 
