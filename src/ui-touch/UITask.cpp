@@ -24736,11 +24736,12 @@ static void openBatteryChartWindow() {
   // Rows step by the fonts' real line heights: the fixed 18 px assumed a 12 px
   // font, and on the boards that grow it (the Pager's 16-18 px text) every line
   // below the chart overlapped the next and the card cut them off.
+#if defined(TLORA_PAGER)
   const int lh12 = (int)lv_font_get_line_height(&g_font_12) + 3;
   const int lh14 = (int)lv_font_get_line_height(&g_font_14) + 4;
-#if defined(TLORA_PAGER)
   const int chart_h = 84;   // the card is 184 px tall here: the chart leaves room for the figures
 #else
+  const int lh12 = 18, lh14 = 18;   // the fixed steps every other board was laid out with
   const int chart_h = 122;
 #endif
   const int chart_x = 30, chart_rpad = 30, chart_y = LV_MAX(18, lh14);
@@ -39590,6 +39591,7 @@ static void mapZoomControlsApply() {
   // the column's last button reached down over it ("7 on map" behind the follow
   // button). Move the label left of the column only when they would meet, so
   // the taller panels keep it in the corner.
+#if defined(TLORA_PAGER)
   if (s_map_count_lbl) {
     lv_obj_t* parent = lv_obj_get_parent(s_map_count_lbl);
     lv_obj_update_layout(s_map_count_lbl);
@@ -39598,6 +39600,7 @@ static void mapZoomControlsApply() {
     const bool clash = col_bottom > lbl_top;
     lv_obj_align(s_map_count_lbl, LV_ALIGN_BOTTOM_RIGHT, clash ? -(32 + 4 + 6) : -2, -2);
   }
+#endif
 }
 static void mapRecenterCb(lv_event_t* e) {
   if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;

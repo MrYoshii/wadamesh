@@ -2494,10 +2494,12 @@ bool touchPrefsGetLockPreviews() { if (!s_begun) touchPrefsBegin(); return s_pre
 void touchPrefsSetLockPreviews(bool on) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("lock_prev", on ? 1 : 0); }
 bool touchPrefsGetGlanceWhenLocked() { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("glance_lck", 0) != 0; }
 void touchPrefsSetGlanceWhenLocked(bool on) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("glance_lck", on ? 1 : 0); }
+#if defined(TLORA_PAGER)   // the Pager's DRV2605 vibration motor
 bool touchPrefsGetVibrate()             { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("vib_on", 1) != 0; }
 void touchPrefsSetVibrate(bool on)      { if (!s_begun) touchPrefsBegin(); prefsPutUChar("vib_on", on ? 1 : 0); }
 bool touchPrefsGetVibrateInput()        { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("vib_in", 0) != 0; }
 void touchPrefsSetVibrateInput(bool on) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("vib_in", on ? 1 : 0); }
+#endif
 bool touchPrefsGetGlanceEnabled()   { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("glance_en", 1) != 0; }
 void touchPrefsSetGlanceEnabled(bool on)    { if (!s_begun) touchPrefsBegin(); prefsPutUChar("glance_en", on ? 1 : 0); }
 uint8_t touchPrefsGetChatIcons() { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("chat_icons", 0) ? 1 : 0; }
@@ -2923,7 +2925,10 @@ static int backupKeys(BkKey* out, int cap) {
   static const char* const k_u8[] = {
     "snd_msg", "snd_men", "snd_dm", "snd_vol", "ign_tiny", "dsc_evict", "dsc_hops",
     "ent_send", "clk_12h", "nav_mbk", "tb_rev", "tb_edgesc", "lock_off", "glance_lck",
-    "glance_en", "msg_led", "dnd_en", "dnd_ss", "dnd_es", "kbd_bl", "vib_on", "vib_in",
+    "glance_en", "msg_led", "dnd_en", "dnd_ss", "dnd_es", "kbd_bl",
+#if defined(TLORA_PAGER)
+    "vib_on", "vib_in",   // the Pager's vibration switches
+#endif
     "chat_icons", "col_more", "col_style", "col_rb", "bg_kind", "gps_save", "gps_every",
     "glass",   // NOT "ant_ext": a restore must never point a unit at an empty antenna socket
   };
