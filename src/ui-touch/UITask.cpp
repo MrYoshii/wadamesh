@@ -48592,6 +48592,9 @@ static lv_obj_t*    s_lock_batt_chg  = nullptr;
 static lv_obj_t*    s_lock_batt_lbl  = nullptr;
 static lv_obj_t*    s_lock_batt_icon = nullptr;
 static int          s_lock_batt_key  = -1;        // last level drawn (redraw guard; +1000 = charging)
+#if defined(TLORA_PAGER)
+static lv_obj_t*    s_lock_batt_gauge = nullptr;  // "480 mA · 1:20 to full", left of the bolt
+#endif
 
 // The lock screen's colours: the theme's palette, or black on white for the
 // Pro's built-in e-paper view.
@@ -49092,10 +49095,36 @@ static void lockBattDrawCb(lv_event_t* e) {
   }
 }
 
+#if defined(TLORA_PAGER)
+// "478 mA · 0:47 to full" / "75 mA · 18:05 left" from the gauge, for the lock
+// screen and the screensaver; empty while the gauge has not answered.
+static void pagerGaugeNote(char* out, size_t cap) {
+  out[0] = '\0';
+  const TLoraPagerBoard::GaugeInfo g = board.getGaugeInfo();
+  if (!g.valid) return;
+  const int ma = g.current_ma < 0 ? -g.current_ma : g.current_ma;
+  const uint16_t mins = g.current_ma > 0 ? g.to_full_min : g.to_empty_min;
+  if (mins != 0xFFFF && mins > 0)
+    snprintf(out, cap, g.current_ma > 0 ? TR("%d mA \xC2\xB7 %u:%02u to full") : TR("%d mA \xC2\xB7 %u:%02u left"),
+             ma, (unsigned)(mins / 60), (unsigned)(mins % 60));
+  else
+    snprintf(out, cap, "%d mA", ma);
+}
+#endif
 static void lockscreenUpdateBattery() {
   if (!s_lock_batt) return;
   const uint16_t mv = batteryMvSmoothed();
   const bool charging = mv && batteryIsCharging(mv);
+#if defined(TLORA_PAGER)
+  // The gauge's current and its time to full / to empty, beside the icon. The
+  // screen stays on while charging, so this is the charge progress at a glance.
+  // Outside the redraw guard: it moves while the percentage does not.
+  if (s_lock_batt_gauge) {
+    char t[40];
+    pagerGaugeNote(t, sizeof t);
+    if (strcmp(lv_label_get_text(s_lock_batt_gauge), t) != 0) lv_label_set_text(s_lock_batt_gauge, t);
+  }
+#endif
   const int pct = mv ? batteryPercentFromMv(mv) : -1;
   const int key = (pct < 0 && !charging) ? -2 : (charging ? 1000 + LV_MAX(pct, 0) : pct);
   if (key == s_lock_batt_key) return;
@@ -49470,6 +49499,13 @@ static void lockscreenShow() {
   // of its own box, where they are clipped (the bolt never showed).
   lv_obj_set_flex_align(s_lock_batt, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_column(s_lock_batt, SC(4), LV_PART_MAIN);
+#if defined(TLORA_PAGER)
+  s_lock_batt_gauge = lv_label_create(s_lock_batt);
+  lv_label_set_text(s_lock_batt_gauge, "");
+  lv_obj_set_style_text_font(s_lock_batt_gauge, &g_font_12, LV_PART_MAIN);
+  lv_obj_set_style_text_color(s_lock_batt_gauge, lv_color_hex(k.ter), LV_PART_MAIN);
+  lv_obj_set_style_pad_right(s_lock_batt_gauge, SC(2), LV_PART_MAIN);
+#endif
   s_lock_batt_chg = lv_label_create(s_lock_batt);
   lv_label_set_text(s_lock_batt_chg, LV_SYMBOL_CHARGE);
   lv_obj_set_style_text_font(s_lock_batt_chg, &g_font_12, LV_PART_MAIN);
@@ -49485,7 +49521,13 @@ static void lockscreenShow() {
   lv_obj_add_event_cb(s_lock_batt_icon, lockBattDrawCb, LV_EVENT_DRAW_MAIN_END, nullptr);
   {
     const lv_coord_t hint_w = (lv_coord_t)(hint_icon_w + SC(5) + hint_sz.x);
-    const lv_coord_t batt_w = (lv_coord_t)(lv_txt_get_width("100%", 4, fhint, 0, LV_TEXT_FLAG_NONE) + SC(4) + SC(17));
+    lv_coord_t batt_w = (lv_coord_t)(lv_txt_get_width("100%", 4, fhint, 0, LV_TEXT_FLAG_NONE) + SC(4) + SC(17));
+#if defined(TLORA_PAGER)
+    {
+      const char* w = TR("%d mA \xC2\xB7 %u:%02u to full");   // the widest gauge line, roughly
+      batt_w += (lv_coord_t)(lv_txt_get_width(w, strlen(w), &g_font_12, 0, LV_TEXT_FLAG_NONE) + SC(6));
+    }
+#endif
     // A few pixels of overlap move the hint left instead (unseen); more than
     // that, and the battery goes to the top right corner.
     const lv_coord_t overlap = (lv_coord_t)(sw / 2 + hint_w / 2 + SC(8) - (sw - SC(8) - batt_w));
@@ -49514,6 +49556,9 @@ static void lockscreenHide() {
   if (s_lock_root) { lv_obj_del(s_lock_root); s_lock_root = nullptr; }
   s_lock_body = s_lock_mark = s_lock_clock = s_lock_date = s_lock_spark = s_lock_heard = s_lock_cap = nullptr;
   s_lock_unread = s_lock_hint = s_lock_batt = s_lock_batt_chg = s_lock_batt_lbl = s_lock_batt_icon = nullptr;
+#if defined(TLORA_PAGER)
+  s_lock_batt_gauge = nullptr;
+#endif
   if (s_lock_wall) { lv_img_cache_invalidate_src(&s_lock_wall_dsc); lvglPsramFree(s_lock_wall); s_lock_wall = nullptr; }
   s_lock_clock_min = -1;
   s_lock_clock_current = -1;
@@ -76816,6 +76861,9 @@ static void ssaverBuildStatus(CstStatus& s, bool north_up) {
   const uint16_t mv = batteryMvSmoothed();
   s.charging = mv && batteryIsCharging(mv);
   s.batt = mv ? batteryPercentFromMv(mv) : -1;
+#if defined(TLORA_PAGER)
+  pagerGaugeNote(s.batt_note, sizeof s.batt_note);   // the screensaver runs while charging
+#endif
   s.north_up = north_up;
 }
 

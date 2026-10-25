@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
+#include <stdlib.h>
 // T-LoRa Pager simulator: the Pager board the UI's TLORA_PAGER branches talk to, on
 // top of the web board. A pack at 76 %, no USB, no card, the radio of the web board.
 #include "../platform/WebBoard.h"
@@ -27,10 +28,14 @@ public:
     bool valid; int16_t current_ma, power_mw; uint16_t remaining_mah, full_mah, to_empty_min, to_full_min;
     int16_t temp_c10; uint16_t cycles, health_pct;
   };
+  // WADA_SIM_CHARGING=1 in the environment: on USB, charging at ~480 mA.
+  static bool simCharging() { static const bool c = getenv("WADA_SIM_CHARGING") != nullptr; return c; }
   GaugeInfo getGaugeInfo() {   // a pack drawing ~42 mA with the screen on
+    if (simCharging())
+      return { true, (int16_t)(476 + (int)(millis() / 1000 % 9)), 1980, 1131, 1488, 0xFFFF, 47, 263, 12, 99 };
     return { true, (int16_t)(-38 - (int)(millis() / 1000 % 9)), -152, 1131, 1488, 1615, 0xFFFF, 241, 12, 99 };
   }
-  int  externalPowerPresent() { return 0; }
+  int  externalPowerPresent() { return simCharging() ? 1 : 0; }
   ChargeState chargeState() { return ChargeState::NotCharging; }
   bool enterShipMode() { return false; }
   SdCardState sdCardState() { return SdCardState::Absent; }

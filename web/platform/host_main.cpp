@@ -191,8 +191,9 @@ void scriptStep() {
       s_script.wait_until = now + 150; return;
     }
 #if defined(WADA_SIM_PAGER)
-    if (cmd == "holdkey") {   // holdkey C MS: type C and keep its key down for MS (Pager simulator)
+    if (cmd == "holdkey") {   // holdkey C MS: type C and keep its key down for MS (Pager simulator; C = space for the space bar)
       std::string k; int ms = 1000; in >> k >> ms;
+      if (k == "space") k = " ";   // the stream drops a literal blank
       if (!k.empty()) simPagerHoldKey((uint8_t)k[0], (uint32_t)ms);
       s_script.wait_until = now + 50; return;
     }

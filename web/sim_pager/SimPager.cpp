@@ -60,9 +60,11 @@ bool pagerKeyboardAltHeld() { return false; }
 void pagerKeyboardMarkAltUsed() {}
 void pagerKeyboardDiscardAlt() {}
 bool pagerKeyboardBackspaceHeld() { return false; }
-bool pagerKeyboardSpaceHeld() { return false; }
+static uint32_t s_space_until = 0;   // "holdkey space MS": the bar held, nothing typed
+bool pagerKeyboardSpaceHeld() { return s_space_until && (int32_t)(millis() - s_space_until) < 0; }
 bool pagerKeyboardLetterHeld() { return s_letter_until && (int32_t)(millis() - s_letter_until) < 0; }
 void simPagerHoldKey(uint8_t c, uint32_t ms) {   // script: type c and hold its key for ms
+  if (c == ' ') { s_space_until = millis() + ms; return; }
   const uint8_t next = (uint8_t)((s_head + 1) & 63u);
   if (next != s_tail) { s_ring[s_head] = c; s_head = next; }
   s_letter_until = millis() + ms;
