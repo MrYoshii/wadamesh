@@ -6448,7 +6448,10 @@ static void navTipFocusMoved(lv_obj_t* f) {
 // focus scope moves; other tabs' lists and anything without a stop stay put.
 static void navScrollStopsTop() {
   for (int i = 0; i < s_nav_count && i < kNavMax; ++i) {
-    lv_obj_t* o = s_nav_objs[i] ? lv_obj_get_parent(s_nav_objs[i]) : nullptr;
+    // The mirror can hold stops already freed: a list rebuilt under the cursor
+    // (Wi-Fi scan results) deletes rows before the collector runs again.
+    if (!s_nav_objs[i] || !lv_obj_is_valid(s_nav_objs[i])) continue;
+    lv_obj_t* o = lv_obj_get_parent(s_nav_objs[i]);
     for (int depth = 0; o && lv_obj_get_parent(o) && depth < 12; ++depth, o = lv_obj_get_parent(o)) {
       if (lv_obj_has_flag(o, LV_OBJ_FLAG_SCROLLABLE) && lv_obj_get_scroll_y(o) > 0)
         lv_obj_scroll_to_y(o, 0, LV_ANIM_OFF);
@@ -6499,7 +6502,11 @@ static void navFocusCb(lv_group_t* g) {
     // scrolled down with the later stops: focusing it moved nothing, and whatever
     // sat above the first field (the Signal popup's chart, a page's intro) could
     // not be reached again with the knob.
-    if (s_nav_count > 0 && f == s_nav_objs[0]) navScrollStopsTop();
+    // Only for a move the user made. LVGL also refocuses on its own while
+    // objects are being deleted (lv_obj_clean -> lv_group_remove_obj ->
+    // lv_group_refocus); walking the stops then read freed rows and crashed
+    // (Wi-Fi scan list refreshing while turning the knob).
+    if (s_nav_count > 0 && f == s_nav_objs[0] && lv_indev_get_act() != nullptr) navScrollStopsTop();
 #endif
   }
 }
