@@ -74,11 +74,13 @@ bool pagerHapticsPresent() { return s_present; }
 
 void pagerHapticsPlay(PagerHaptic kind) {
   if (!s_present) return;
-  // Library A effect ids: 1 strong click, 14 strong buzz, 24 sharp tick.
+  // Library A effect ids: 1 strong click, 14 strong buzz. The key/knob click is
+  // effect 1 too: the sharp ticks (24-26) are too short for this ERM motor to
+  // spin up, and were not felt at all on hardware.
   static const uint8_t k_msg[]  = { 14, 0 };
   static const uint8_t k_dm[]   = { 14, DRV_WAIT(12), 14, 0 };
   static const uint8_t k_men[]  = { 1, DRV_WAIT(8), 1, DRV_WAIT(8), 14, 0 };
-  static const uint8_t k_tick[] = { 24, 0 };
+  static const uint8_t k_tick[] = { 1, 0 };
   const uint8_t* seq = k_msg;
   size_t n = sizeof k_msg;
   switch (kind) {
