@@ -83,6 +83,12 @@ Battery care and quiet modes (all Pager-only, gated `TLORA_PAGER`):
   draw on battery (4 h time constant, plain average until then, used after 30 min
   of battery time, NVS `bat_use`) instead of the gauge's last-minute
   time-to-empty; popup, lock screen and screensaver. On USB the gauge's figures stay.
+- **GPS** (u-blox MIA-M10Q): a rail that just came up (boot, GPS switched back on)
+  is a cold start, so `PagerGps` sends UBX-MGA-INI-TIME_UTC (RTC) and
+  UBX-MGA-INI-POS_LLH (stored node position, 100 km accuracy) 3 s later. The GPS
+  saver on the Pager stays awake 3 min after the map / GPS page / Discover closes,
+  holds a fix 2 min (orbits for the next hot start) instead of 30 s, and searches
+  10 min for the first fix after boot (3 min later).
 - **Shift + knob**: Shift + turn = brightness, Shift + click = switch the knob to
   volume; a level pill shows it (`pagerModifierKnob()`). Needs
   `pagerKeyboardShiftHeld()` (new, additive getter in the shared keyboard driver).
