@@ -39837,6 +39837,34 @@ static void mapZoomSliderReleaseCb(lv_event_t* e) {
   renderMapMarkers();
   refreshMapInfoLabel();
 }
+#if defined(HAS_PAGER_ENCODER)
+// Pager: with the slider open from the "+/-" button (still focused), the knob
+// zooms instead of moving the focus on; clicking the button again closes the
+// slider and hands the knob back to the focus ring.
+static bool pagerMapZoomTurn(bool up) {
+  if (!s_map_zoom_slider || lv_obj_has_flag(s_map_zoom_slider, LV_OBJ_FLAG_HIDDEN)) return false;
+  if (getActiveTab() != MAP_TAB_INDEX || anyPopupOpen()) return false;
+  if (!s_nav_group || lv_group_get_focused(s_nav_group) != s_map_btn_zoomtoggle) return false;
+  navTipHide();   // the "Shows the zoom slider" card would sit over the map while zooming
+  // One slider step per detent, clockwise (down) zooms in like the slider's
+  // left-to-right, applied the way releasing the slider applies it.
+  int z = (int)s_map_zoom + (up ? -1 : 1);
+  if (z < (int)k_map_zoom_min) z = k_map_zoom_min;
+  if (z > (int)k_map_zoom_max) z = k_map_zoom_max;
+  lv_slider_set_value(s_map_zoom_slider, z, LV_ANIM_OFF);
+  if (s_map_zoom_val) lv_label_set_text_fmt(s_map_zoom_val, TR("zoom %d"), z);
+  if ((uint8_t)z != s_map_zoom) {
+    s_map_zoom = (uint8_t)z;
+#if defined(ESP32)
+    touchPrefsSetMapZoom(s_map_zoom);
+#endif
+    renderMapTiles();
+    renderMapMarkers();
+    refreshMapInfoLabel();
+  }
+  return true;
+}
+#endif
 static void mapZoomToggleCb(lv_event_t* e) {
   if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
   if (!s_map_zoom_slider) return;
@@ -48408,12 +48436,12 @@ static void updatePagerEncoder(unsigned long now) {
     // edge bubble of a still-loading history scrolls the list instead of
     // stepping focus out (pagerEncoderChatEdgeScroll).
     for (; delta > 0; delta--) {
-      if (!navInfoModalScroll(false) && !pagerEncoderScrollOversizedFocused(false) &&
+      if (!pagerMapZoomTurn(false) && !navInfoModalScroll(false) && !pagerEncoderScrollOversizedFocused(false) &&
           !pagerChatComposerNav(false) && !pagerEncoderChatEdgeScroll(false) && !pagerEncoderEdgeScroll(false))
         navPushTap(LV_KEY_NEXT);
     }
     for (; delta < 0; delta++) {
-      if (!navInfoModalScroll(true) && !pagerEncoderScrollOversizedFocused(true) &&
+      if (!pagerMapZoomTurn(true) && !navInfoModalScroll(true) && !pagerEncoderScrollOversizedFocused(true) &&
           !pagerChatComposerNav(true) && !pagerEncoderChatEdgeScroll(true) && !pagerEncoderEdgeScroll(true))
         navPushTap(LV_KEY_PREV);
     }
