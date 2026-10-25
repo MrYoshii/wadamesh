@@ -64,9 +64,14 @@ The chips that had power but no driver now do something:
 Still not driven: the **ST25R3916 NFC** reader (needs ST's RFAL stack) and
 the codec's microphone input.
 
-**Needs hardware confirmation**: ship mode wake via the power key, the
-charging icon on/off with USB, the gauge percent after the capacity write,
-the vibration patterns' strength, and the IMU upload time / axis signs.
+**Hardware-confirmed (2026-10-25, SX1262 unit)**: vibration on message /
+DM / mention with distinguishable patterns; charging icon follows USB; ship
+mode power-off, woken by holding the power key for about 2 s (a 1 s press
+was not enough). The sharp-tick key click was not felt and now uses the
+strong-click effect.
+
+**Still to confirm**: the stronger key click, the gauge percent after the
+capacity write, and the IMU upload time / axis signs.
 
 Risk 11 (keyboard/encoder scroll not repainting) is **accepted as
 workaround-final**: the Alt+turn free-scroll gesture is the intended fix for
