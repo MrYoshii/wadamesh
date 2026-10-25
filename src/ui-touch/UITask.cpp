@@ -24681,10 +24681,19 @@ static void batteryGaugeRefresh() {
     return;
   }
   const bool charging = g.current_ma > 0;
+  if (const int blk = board.chargeTempBlock()) {
+    // The temperature guard holds charging off: say so, and at what temperature.
+    snprintf(a, sizeof a, blk > 0 ? TR("Charging paused: battery too hot (%d \xC2\xB0" "C)")
+                                  : TR("Charging paused: battery too cold (%d \xC2\xB0" "C)"),
+             (int)(g.temp_c10 / 10));
+    lv_label_set_text(s_bg_now, a);
+    lv_obj_set_style_text_color(s_bg_now, lv_color_hex(COLOR_STATUS_WARN_TEXT), LV_PART_MAIN);
+  } else {
   snprintf(a, sizeof a, charging ? TR("Charging %d mA \xC2\xB7 %d mW") : TR("Drawing %d mA \xC2\xB7 %d mW"),
            (int)(g.current_ma < 0 ? -g.current_ma : g.current_ma), (int)(g.power_mw < 0 ? -g.power_mw : g.power_mw));
   lv_label_set_text(s_bg_now, a);
   lv_obj_set_style_text_color(s_bg_now, lv_color_hex(charging ? COLOR_STATUS_OK : COLOR_ACCENT), LV_PART_MAIN);
+  }
   if (charging && g.to_full_min != 0xFFFF) {
     fmtMinutes(t, sizeof t, g.to_full_min);
     snprintf(b, sizeof b, TR("%u / %u mAh \xC2\xB7 full in %s"), (unsigned)g.remaining_mah, (unsigned)g.full_mah, t);
@@ -49221,6 +49230,10 @@ static void lockBattDrawCb(lv_event_t* e) {
 // screen and the screensaver; empty while the gauge has not answered.
 static void pagerGaugeNote(char* out, size_t cap) {
   out[0] = '\0';
+  if (const int blk = board.chargeTempBlock()) {   // why the plugged-in Pager is not charging
+    snprintf(out, cap, "%s", blk > 0 ? TR("Charging paused: too hot") : TR("Charging paused: too cold"));
+    return;
+  }
   const TLoraPagerBoard::GaugeInfo g = board.getGaugeInfo();
   if (!g.valid) return;
   const int ma = g.current_ma < 0 ? -g.current_ma : g.current_ma;
@@ -49658,8 +49671,12 @@ static void lockscreenShow() {
     lv_coord_t batt_w = (lv_coord_t)(lv_txt_get_width("100%", 4, fhint, 0, LV_TEXT_FLAG_NONE) + SC(4) + SC(17));
 #if defined(TLORA_PAGER)
     {
-      const char* w = TR("%d mA \xC2\xB7 %u:%02u to full");   // the widest gauge line, roughly
-      batt_w += (lv_coord_t)(lv_txt_get_width(w, strlen(w), &g_font_12, 0, LV_TEXT_FLAG_NONE) + SC(6) + 2 * SC(8));   // + pill padding
+      // The widest line it can show, roughly: the gauge figures or a charge pause.
+      lv_coord_t gw = 0;
+      for (const char* w : { TR("%d mA \xC2\xB7 %u:%02u to full"), TR("Charging paused: too cold"),
+                             TR("Charging paused: too hot") })
+        gw = LV_MAX(gw, lv_txt_get_width(w, strlen(w), &g_font_12, 0, LV_TEXT_FLAG_NONE));
+      batt_w += (lv_coord_t)(gw + SC(6) + 2 * SC(8));   // + pill padding
     }
 #endif
     // A few pixels of overlap move the hint left instead (unseen); more than
@@ -80679,6 +80696,18 @@ void UITask::loop() {
     if (now - s_wifi_ps_ms >= 1000) { s_wifi_ps_ms = now; pagerWifiPsUpdate(-1); }
   }
 #endif
+  {
+    // The charge temperature guard (TLoraPagerBoard::chargeThermalCheck) acts on
+    // its own; tell the user when it pauses or resumes charging.
+    static int s_chg_blk = 0;
+    const int blk = board.chargeTempBlock();
+    if (blk != s_chg_blk) {
+      s_chg_blk = blk;
+      showAlert(blk > 0 ? TR("Charging paused: battery too hot")
+              : blk < 0 ? TR("Charging paused: battery too cold")
+                        : TR("Battery temperature OK, charging again"), 4000);
+    }
+  }
 #endif
 #elif defined(HAS_M9_KEYBOARD)
   // Own the stall buckets for everything a keypress triggers. The "ui:input"

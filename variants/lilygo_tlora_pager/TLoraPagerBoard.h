@@ -149,6 +149,10 @@ public:
   int  externalPowerPresent();
   ChargeState chargeState();
 
+  // Charging held off for the pack's temperature (gauge reading): 1 too hot,
+  // -1 too cold, 0 charging allowed. See chargeThermalCheck().
+  int chargeTempBlock() const { return charge_temp_block_; }
+
   // Real power-off: opens the charger's battery switch (BQ25896 ship mode,
   // BATFET_DIS), which takes the whole board down to the charger's own leakage,
   // about 26 µA against about 530 µA in deep sleep. Only the power key (the
@@ -162,6 +166,7 @@ public:
 
 private:
   void refreshGauge();
+  void chargeThermalCheck(int16_t temp_c10);
 
   bool expander_ready_ = false;
   bool charger_ready_ = false;
@@ -173,5 +178,6 @@ private:
   int8_t   ext_pwr_ = -1;   // externalPowerPresent() cache
   uint8_t  sys_stat_ = 0;   // REG0B as last read
   uint32_t chg_ms_ = 0;     // when the charger was last read, 0 = never
+  int8_t   charge_temp_block_ = 0;   // chargeTempBlock()
   SemaphoreHandle_t expander_mutex_ = nullptr;
 };

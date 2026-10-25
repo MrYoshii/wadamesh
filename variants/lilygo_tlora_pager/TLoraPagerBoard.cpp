@@ -145,6 +145,9 @@ void TLoraPagerBoard::begin() {
   if (charger_ready_) {
     s_charger.setChargeTargetVoltage(4288);
     s_charger.setChargerConstantCurr(704);
+    // CHG_CONFIG survives an ESP reset: a reboot while the temperature guard
+    // had charging off must not leave it off. The guard re-checks within 2 s.
+    s_charger.enableCharge();
     const int stat = s_charger.readRegister(0x0B);
     if (stat >= 0) sys_stat_ = (uint8_t)stat;
   }
@@ -267,6 +270,37 @@ void TLoraPagerBoard::refreshGauge() {
   g.cycles        = gauge.getCycleCount();
   g.health_pct    = gauge.getStateOfHealth();
   gauge_info_ = g;
+  chargeThermalCheck(g.temp_c10);
+}
+
+// Charging only between 0 and 45 °C pack temperature (the usual Li-ion window;
+// LilyGo's sheet allows up to 60 °C, which ages a cell fast). The BQ25896 has
+// its own NTC input, but nothing in this firmware relies on it being wired, so
+// the gauge's reading decides: charging switches off outside the window and
+// back on 3 °C inside it, so it does not flap at the edge. The power path is
+// untouched: on USB the board keeps running from VBUS either way.
+#define PAGER_CHG_TEMP_MAX_C10   450
+#define PAGER_CHG_TEMP_MIN_C10     0
+#define PAGER_CHG_TEMP_HYST_C10   30
+void TLoraPagerBoard::chargeThermalCheck(int16_t t) {
+  if (!charger_ready_) return;
+  if (t < -400 || t > 1000) return;              // not a plausible reading: change nothing
+  int8_t want = charge_temp_block_;
+  if (charge_temp_block_ == 0) {
+    if (t > PAGER_CHG_TEMP_MAX_C10)      want = 1;
+    else if (t < PAGER_CHG_TEMP_MIN_C10) want = -1;
+  } else if (t <= PAGER_CHG_TEMP_MAX_C10 - PAGER_CHG_TEMP_HYST_C10 &&
+             t >= PAGER_CHG_TEMP_MIN_C10 + PAGER_CHG_TEMP_HYST_C10) {
+    want = 0;
+  }
+  if (want == charge_temp_block_) return;
+  charge_temp_block_ = want;
+  if (want) s_charger.disableCharge();
+  else      s_charger.enableCharge();
+  chg_ms_ = 0;                                   // re-read the charge status next time
+  Serial.printf("[POWER] charging %s (pack %d.%d C)\n",
+                want > 0 ? "paused, too hot" : want < 0 ? "paused, too cold" : "resumed",
+                t / 10, (t < 0 ? -t : t) % 10);
 }
 
 // REG0B (system status): VBUS_STAT[7:5] (000 no input, 001 USB host, 010
