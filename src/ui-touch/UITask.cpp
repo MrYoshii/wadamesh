@@ -39546,6 +39546,19 @@ static void mapZoomControlsApply() {
   show(s_map_btn_recenter, y); y += H;
   show(s_map_btn_contacts, y); y += H;
   if (s_map_follow_btn) lv_obj_set_pos(s_map_follow_btn, X, y);
+  // The marker count sits in the bottom-right corner, under this column. On a
+  // short map (the Pager's 222-px panel, the +/- buttons mode anywhere small)
+  // the column's last button reached down over it ("7 on map" behind the follow
+  // button). Move the label left of the column only when they would meet, so
+  // the taller panels keep it in the corner.
+  if (s_map_count_lbl) {
+    lv_obj_t* parent = lv_obj_get_parent(s_map_count_lbl);
+    lv_obj_update_layout(s_map_count_lbl);
+    const int col_bottom = y + 28 + 4;   // follow button + its gutter
+    const int lbl_top = (int)lv_obj_get_height(parent) - 2 - (int)lv_obj_get_height(s_map_count_lbl);
+    const bool clash = col_bottom > lbl_top;
+    lv_obj_align(s_map_count_lbl, LV_ALIGN_BOTTOM_RIGHT, clash ? -(32 + 4 + 6) : -2, -2);
+  }
 }
 static void mapRecenterCb(lv_event_t* e) {
   if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
