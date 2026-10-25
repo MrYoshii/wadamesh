@@ -618,8 +618,14 @@ void    touchPrefsSetGlanceWhenLocked(bool on);
 #if defined(TLORA_PAGER)
 bool    touchPrefsGetVibrate();               // Pager: vibrate for messages that would chime (default true)
 void    touchPrefsSetVibrate(bool on);
-bool    touchPrefsGetVibrateInput();          // Pager: a light click per key / knob detent (default false)
+bool    touchPrefsGetVibrateInput();          // Pager: a click per key / knob detent (default false)
 void    touchPrefsSetVibrateInput(bool on);
+uint8_t touchPrefsGetVibrateKeyLevel();       // 0 off, 1 light, 2 strong (the vib_in key; its old "on" = strong)
+void    touchPrefsSetVibrateKeyLevel(uint8_t level);
+uint8_t touchPrefsGetVibrateStrength();       // 0 light, 1 medium, 2 strong (default 2)
+void    touchPrefsSetVibrateStrength(uint8_t s);
+uint8_t touchPrefsGetVibratePattern(uint8_t kind);   // kind 0 message, 1 DM, 2 @mention -> PagerVibPattern
+void    touchPrefsSetVibratePattern(uint8_t kind, uint8_t pattern);
 // Pager charging (Settings > Battery > Charging). Deliberately not in the backup:
 // a restore must never bring back a limit someone else chose to take a risk with.
 uint16_t touchPrefsGetChargeMa();            // fast-charge current, mA (default 704)

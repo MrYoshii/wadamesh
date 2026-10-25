@@ -13268,26 +13268,25 @@ static void toggleLoudAlertsCb(lv_event_t* e) {
 #endif
 
 #if defined(TLORA_PAGER)
-// "Vibrate on keys": a short click per keypress and per knob detent. Cached, since
-// it is read on every key; -1 = not loaded from NVS yet.
+// Key click: a click per keypress and per knob detent, 0 off, 1 light, 2 strong.
+// Cached, since it is read on every key; -1 = not loaded from NVS yet.
 static int8_t s_vib_input = -1;
-static inline bool vibInputOn() {
-  if (s_vib_input < 0) s_vib_input = touchPrefsGetVibrateInput() ? 1 : 0;
-  return s_vib_input != 0;
+static inline uint8_t vibKeyLevel() {
+  if (s_vib_input < 0) s_vib_input = (int8_t)touchPrefsGetVibrateKeyLevel();
+  return (uint8_t)s_vib_input;
 }
-static void toggleVibrateInputCb(lv_event_t* e) {
-  if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
-  const bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
-  touchPrefsSetVibrateInput(on);
-  s_vib_input = on ? 1 : 0;
+static inline bool vibInputOn() { return vibKeyLevel() != 0; }
+// The pattern for a message kind (0 message, 1 DM, 2 @mention) at the chosen strength.
+static void vibPlayKind(uint8_t kind) {
+  pagerHapticsPattern(touchPrefsGetVibratePattern(kind), touchPrefsGetVibrateStrength());
 }
-// Vibration switch (the Pager's DRV2605 motor). Turning it on gives one buzz, so
-// the setting proves itself under your thumb.
+// Vibration switch (the Pager's DRV2605 motor). Turning it on plays the message
+// pattern, so the setting proves itself under your thumb.
 static void toggleVibrateCb(lv_event_t* e) {
   if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
   const bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
   touchPrefsSetVibrate(on);
-  if (on) pagerHapticsPlay(PagerHaptic::Message);
+  if (on) vibPlayKind(0);
 }
 #endif
 static void toggleMessageSoundCb(lv_event_t* e) {
@@ -18573,6 +18572,23 @@ static void setSwatchPick(lv_obj_t* tapped) {
 }
 
 // ---- Settings > Sound ---------------------------------------------------------------
+#if defined(TLORA_PAGER)
+// Settings > Sound > Vibration choice rows: 0 strength, 1-3 the message kinds'
+// patterns, 4 the key click.
+static lv_obj_t* s_vib_rows[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
+static void vibChoiceCb(lv_event_t* e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  const int i = setChoiceIndex(e);
+  lv_obj_t* row = lv_obj_get_parent(lv_event_get_current_target(e));
+  int r = -1;
+  for (int k = 0; k < 5; ++k) if (row == s_vib_rows[k]) r = k;
+  if (r < 0 || i < 0) return;
+  if (r == 0) { touchPrefsSetVibrateStrength((uint8_t)i); pagerHapticsPattern(PAGER_VIB_ONCE, (uint8_t)i); }
+  else if (r <= 3) { touchPrefsSetVibratePattern((uint8_t)(r - 1), (uint8_t)i); vibPlayKind((uint8_t)(r - 1)); }
+  else { touchPrefsSetVibrateKeyLevel((uint8_t)i); s_vib_input = (int8_t)i; pagerHapticsClick((uint8_t)i); }
+  setChoicePick(row, i);
+}
+#endif
 static void buildSoundPage() {
 #if defined(ATTAKY_MESH_SERIES)
   {
@@ -18631,8 +18647,16 @@ static void buildSoundPage() {
     setSwitchRow(c, "Vibrate", "Buzzes for the same messages as the sound below, even with Sound off. "
                  "Do Not Disturb and muted channels stay still.",
                  touchPrefsGetVibrate(), toggleVibrateCb);
-    setSwitchRow(c, "Vibrate on keys", "A short click for each keypress and each turn of the knob.",
-                 vibInputOn(), toggleVibrateInputCb);
+    // Each choice plays itself when picked, so you feel what you chose.
+    const char* so[] = { TR("Light"), TR("Medium"), TR("Strong") };
+    s_vib_rows[0] = setChoiceRow(c, "Strength", nullptr, so, 3, touchPrefsGetVibrateStrength(), vibChoiceCb);
+    const char* po[] = { TR("Off"), TR("Once"), TR("Twice"), "3\xC3\x97", TR("Long"), TR("Pulse") };
+    s_vib_rows[1] = setChoiceRow(c, "Channel message", nullptr, po, PAGER_VIB_PATTERNS, touchPrefsGetVibratePattern(0), vibChoiceCb);
+    s_vib_rows[2] = setChoiceRow(c, "Direct message", nullptr, po, PAGER_VIB_PATTERNS, touchPrefsGetVibratePattern(1), vibChoiceCb);
+    s_vib_rows[3] = setChoiceRow(c, "@ mention", nullptr, po, PAGER_VIB_PATTERNS, touchPrefsGetVibratePattern(2), vibChoiceCb);
+    const char* ko[] = { TR("Off"), TR("Light"), TR("Strong") };
+    s_vib_rows[4] = setChoiceRow(c, "Key click", "A click for each keypress and each turn of the knob.",
+                                 ko, 3, vibKeyLevel(), vibChoiceCb);
   }
 #endif
   {
@@ -48530,7 +48554,7 @@ static void updatePagerEncoder(unsigned long now) {
   if ((delta != 0 || held) && g_lv.task) g_lv.task->noteUserInput();
   if (delta != 0 || held) noteKbActivity();   // same activity counts for the keyboard-backlight auto mode
 #if defined(TLORA_PAGER)
-  if (delta != 0 && vibInputOn()) pagerHapticsPlay(PagerHaptic::Tick);   // one click per detent batch
+  if (delta != 0 && vibInputOn()) pagerHapticsClick(vibKeyLevel());   // one click per detent batch
 #endif
 
   // The PIN screen: turning walks its number pad, a click presses the lit key.
@@ -78931,9 +78955,9 @@ void UITask::newMsgImpl(uint8_t path_len, const char* from_name, const char* tex
     const bool is_mention = channel && text && textMentionsMe(text);
     const bool is_dm = (g_last_event == UIEventType::contactMessage);
     const uint8_t cmute = channel ? touchPrefsGetChannelMute(thread) : 0;
-    if (is_mention && touchPrefsGetSoundMentions() && !(cmute & TOUCH_CHMUTE_MEN)) pagerHapticsPlay(PagerHaptic::Mention);
-    else if (is_dm) { if (touchPrefsGetSoundDirect()) pagerHapticsPlay(PagerHaptic::Direct); }
-    else if (touchPrefsGetSoundMessages() && !(cmute & TOUCH_CHMUTE_MSG))          pagerHapticsPlay(PagerHaptic::Message);
+    if (is_mention && touchPrefsGetSoundMentions() && !(cmute & TOUCH_CHMUTE_MEN)) vibPlayKind(2);
+    else if (is_dm) { if (touchPrefsGetSoundDirect()) vibPlayKind(1); }
+    else if (touchPrefsGetSoundMessages() && !(cmute & TOUCH_CHMUTE_MSG))          vibPlayKind(0);
   }
 #endif
 #if defined(HAS_TOUCH_UI)
@@ -80842,7 +80866,7 @@ void UITask::loop() {
       noteKbActivity();   // Pro keypresses re-arm keyboard-light Auto mode
 #endif
 #if defined(TLORA_PAGER)
-      if (vibInputOn()) pagerHapticsPlay(PagerHaptic::Tick);
+      if (vibInputOn()) pagerHapticsClick(vibKeyLevel());
 #endif
       handleHwKey(key);
     }

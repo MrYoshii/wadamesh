@@ -2224,3 +2224,13 @@ Switch the temperature guard off?\nThe Pager then charges a hot or frozen batter
 Charge up to this temperature?\nAbove 45 °C a LiPo wears out fast while charging, and the risk of swelling or fire goes up.	Bis zu dieser Temperatur laden?\nÜber 45 °C altert ein LiPo beim Laden schnell, und das Risiko für Aufblähen oder Feuer steigt.
 Moving aurora stays still while Battery saver is on (Settings > Battery).	Die bewegte Aurora bleibt stehen, solange der Energiesparmodus an ist (Einstellungen > Akku).
 Charge limits	Ladegrenzen
+Strength	Stärke
+Light	Leicht
+Strong	Stark
+Once	Einmal
+Twice	Zweimal
+Long	Lang
+Pulse	Puls
+Key click	Tastenklick
+@ mention	@-Erwähnung
+A click for each keypress and each turn of the knob.	Ein Klick bei jedem Tastendruck und jedem Dreh am Rad.

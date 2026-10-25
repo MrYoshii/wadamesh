@@ -66,6 +66,45 @@ void pagerHapticsPlay(PagerHaptic kind) {
   s_check_ms = millis() + 250;
 }
 
+static void playSeq(const uint8_t* seq, size_t n) {
+  if (!s_present) return;
+  s_drv.setMode(SensorDRV2605::MODE_INTTRIG);
+  s_drv.stop();
+  for (size_t i = 0; i < 8; ++i) s_drv.setWaveform((uint8_t)i, i < n ? seq[i] : 0);
+  s_drv.run();
+  s_awake = true;
+  s_check_ms = millis() + 250;
+}
+
+void pagerHapticsPattern(uint8_t pattern, uint8_t strength) {
+  if (strength > 2) strength = 2;
+  // Library A: 14 strong buzz (100 %), 48 / 49 buzz at 80 / 60 %; clicks 1 / 2 / 3
+  // at 100 / 60 / 30 %. The motor's own inertia makes anything weaker than that
+  // hard to feel, so "light" stops at 60 %.
+  static const uint8_t k_buzz[3]  = { 49, 48, 14 };
+  static const uint8_t k_click[3] = { 2, 1, 1 };
+  const uint8_t b = k_buzz[strength], c = k_click[strength];
+  uint8_t seq[8] = { 0 };
+  size_t n = 0;
+  switch (pattern) {
+    case PAGER_VIB_ONCE:   seq[0] = b; n = 1; break;
+    case PAGER_VIB_TWICE:  seq[0] = b; seq[1] = DRV_WAIT(12); seq[2] = b; n = 3; break;
+    case PAGER_VIB_THRICE: seq[0] = b; seq[1] = DRV_WAIT(8); seq[2] = b; seq[3] = DRV_WAIT(8); seq[4] = b; n = 5; break;
+    case PAGER_VIB_LONG:   seq[0] = b; seq[1] = b; seq[2] = b; seq[3] = b; n = 4; break;
+    case PAGER_VIB_PULSE:  // a heartbeat: two quick clicks, a rest, two more
+      seq[0] = c; seq[1] = DRV_WAIT(10); seq[2] = c; seq[3] = DRV_WAIT(40);
+      seq[4] = c; seq[5] = DRV_WAIT(10); seq[6] = c; n = 7; break;
+    default: return;      // PAGER_VIB_OFF
+  }
+  playSeq(seq, n);
+}
+
+void pagerHapticsClick(uint8_t level) {
+  if (!level) return;
+  const uint8_t seq[1] = { (uint8_t)(level >= 2 ? 1 : 2) };   // strong click 100 % / 60 %
+  playSeq(seq, 1);
+}
+
 void pagerHapticsIdleTick() {
   if (!s_awake) return;
   const uint32_t now = millis();

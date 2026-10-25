@@ -2499,6 +2499,27 @@ bool touchPrefsGetVibrate()             { if (!s_begun) touchPrefsBegin(); retur
 void touchPrefsSetVibrate(bool on)      { if (!s_begun) touchPrefsBegin(); prefsPutUChar("vib_on", on ? 1 : 0); }
 bool touchPrefsGetVibrateInput()        { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("vib_in", 0) != 0; }
 void touchPrefsSetVibrateInput(bool on) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("vib_in", on ? 1 : 0); }
+// vib_in: 0 off, 1 strong (what the old on/off switch stored), 2 light.
+uint8_t touchPrefsGetVibrateKeyLevel() {
+  if (!s_begun) touchPrefsBegin();
+  const uint8_t v = s_prefs.getUChar("vib_in", 0);
+  return v == 1 ? 2 : v == 2 ? 1 : 0;
+}
+void touchPrefsSetVibrateKeyLevel(uint8_t l) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("vib_in", l >= 2 ? 1 : l == 1 ? 2 : 0); }
+uint8_t touchPrefsGetVibrateStrength() { if (!s_begun) touchPrefsBegin(); const uint8_t v = s_prefs.getUChar("vib_str", 2); return v > 2 ? 2 : v; }
+void touchPrefsSetVibrateStrength(uint8_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("vib_str", v > 2 ? 2 : v); }
+uint8_t touchPrefsGetVibratePattern(uint8_t kind) {
+  if (!s_begun) touchPrefsBegin();
+  static const char* const k[3] = { "vib_pm", "vib_pd", "vib_pn" };
+  static const uint8_t dflt[3] = { 1, 2, 3 };   // once, twice, three times: what it always did
+  if (kind > 2) kind = 0;
+  return s_prefs.getUChar(k[kind], dflt[kind]);
+}
+void touchPrefsSetVibratePattern(uint8_t kind, uint8_t p) {
+  if (!s_begun) touchPrefsBegin();
+  static const char* const k[3] = { "vib_pm", "vib_pd", "vib_pn" };
+  if (kind <= 2) prefsPutUChar(k[kind], p);
+}
 uint16_t touchPrefsGetChargeMa()        { if (!s_begun) touchPrefsBegin(); return s_prefs.getUShort("chg_ma", 704); }
 void     touchPrefsSetChargeMa(uint16_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUShort("chg_ma", v); }
 uint16_t touchPrefsGetChargeMv()        { if (!s_begun) touchPrefsBegin(); return s_prefs.getUShort("chg_mv", 4288); }
@@ -2933,7 +2954,7 @@ static int backupKeys(BkKey* out, int cap) {
     "ent_send", "clk_12h", "nav_mbk", "tb_rev", "tb_edgesc", "lock_off", "glance_lck",
     "glance_en", "msg_led", "dnd_en", "dnd_ss", "dnd_es", "kbd_bl",
 #if defined(TLORA_PAGER)
-    "vib_on", "vib_in",   // the Pager's vibration switches
+    "vib_on", "vib_in", "vib_str", "vib_pm", "vib_pd", "vib_pn",   // the Pager's vibration settings
 #endif
     "chat_icons", "col_more", "col_style", "col_rb", "bg_kind", "gps_save", "gps_every",
     "glass",   // NOT "ant_ext": a restore must never point a unit at an empty antenna socket
