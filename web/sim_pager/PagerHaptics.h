@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 // T-LoRa Pager simulator: the vibration motor prints what it would play.
 #include <stdint.h>

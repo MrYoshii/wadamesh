@@ -24555,7 +24555,79 @@ static void batteryLogTick(uint32_t now_ms) {
   hwBattPush((uint32_t)time(nullptr), mv);   // the Battery widget's last 24 h
 }
 
+#if defined(TLORA_PAGER)
+// The Pager's fuel gauge, live in the battery popup: what the pack is delivering
+// right now, what it holds, and how long that lasts at the present draw.
+static lv_obj_t*   s_bg_now  = nullptr;   // "-42 mA · 152 mW"
+static lv_obj_t*   s_bg_cap  = nullptr;   // "1131 / 1488 mAh · 26 h 55 min left"
+static lv_obj_t*   s_bg_misc = nullptr;   // "24.1 °C · 12 cycles · health 99 %"
+static lv_timer_t* s_bg_timer = nullptr;
+static void fmtMinutes(char* out, size_t cap, uint16_t mins) {
+  if (mins >= 60) snprintf(out, cap, "%u h %02u min", (unsigned)(mins / 60), (unsigned)(mins % 60));
+  else            snprintf(out, cap, "%u min", (unsigned)mins);
+}
+static void batteryGaugeRefresh() {
+  if (!s_bg_now || !lv_obj_is_valid(s_bg_now)) return;
+  const TLoraPagerBoard::GaugeInfo g = board.getGaugeInfo();
+  char a[64], b[96], c[80], t[24];
+  if (!g.valid) {
+    lv_label_set_text(s_bg_now, TR("Fuel gauge not answering"));
+    lv_label_set_text(s_bg_cap, "");
+    lv_label_set_text(s_bg_misc, "");
+    return;
+  }
+  const bool charging = g.current_ma > 0;
+  snprintf(a, sizeof a, charging ? TR("Charging %d mA \xC2\xB7 %d mW") : TR("Drawing %d mA \xC2\xB7 %d mW"),
+           (int)(g.current_ma < 0 ? -g.current_ma : g.current_ma), (int)(g.power_mw < 0 ? -g.power_mw : g.power_mw));
+  lv_label_set_text(s_bg_now, a);
+  lv_obj_set_style_text_color(s_bg_now, lv_color_hex(charging ? COLOR_STATUS_OK : COLOR_ACCENT), LV_PART_MAIN);
+  if (charging && g.to_full_min != 0xFFFF) {
+    fmtMinutes(t, sizeof t, g.to_full_min);
+    snprintf(b, sizeof b, TR("%u / %u mAh \xC2\xB7 full in %s"), (unsigned)g.remaining_mah, (unsigned)g.full_mah, t);
+  } else if (!charging && g.to_empty_min != 0xFFFF) {
+    fmtMinutes(t, sizeof t, g.to_empty_min);
+    snprintf(b, sizeof b, TR("%u / %u mAh \xC2\xB7 %s left"), (unsigned)g.remaining_mah, (unsigned)g.full_mah, t);
+  } else {
+    snprintf(b, sizeof b, "%u / %u mAh", (unsigned)g.remaining_mah, (unsigned)g.full_mah);
+  }
+  lv_label_set_text(s_bg_cap, b);
+  snprintf(c, sizeof c, TR("%d.%d \xC2\xB0" "C \xC2\xB7 %u cycles \xC2\xB7 health %u%%"),
+           (int)(g.temp_c10 / 10), (int)((g.temp_c10 < 0 ? -g.temp_c10 : g.temp_c10) % 10),
+           (unsigned)g.cycles, (unsigned)g.health_pct);
+  lv_label_set_text(s_bg_misc, c);
+}
+static void batteryGaugeTimerCb(lv_timer_t*) { batteryGaugeRefresh(); }
+static void batteryGaugeStop() {
+  if (s_bg_timer) { lv_timer_del(s_bg_timer); s_bg_timer = nullptr; }
+  s_bg_now = s_bg_cap = s_bg_misc = nullptr;
+}
+// The three gauge lines from (0, y) in the card; returns the height they take.
+static int batteryGaugeBlock(lv_obj_t* card, int y, lv_coord_t w) {
+  batteryGaugeStop();
+  const int lh14 = (int)lv_font_get_line_height(&g_font_14) + 2;
+  const int lh12 = (int)lv_font_get_line_height(&g_font_12) + 2;
+  auto mk = [&](const lv_font_t* f, uint32_t col, int yy) {
+    lv_obj_t* l = lv_label_create(card);
+    lv_obj_set_style_text_font(l, f, LV_PART_MAIN);
+    lv_obj_set_style_text_color(l, lv_color_hex(col), LV_PART_MAIN);
+    lv_obj_set_width(l, w);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+    lv_label_set_text(l, "");
+    lv_obj_set_pos(l, 0, yy);
+    return l;
+  };
+  s_bg_now  = mk(&g_font_14, COLOR_ACCENT, y);
+  s_bg_cap  = mk(&g_font_12, COLOR_TEXT, y + lh14);
+  s_bg_misc = mk(&g_font_12, COLOR_SUB, y + lh14 + lh12);
+  batteryGaugeRefresh();
+  s_bg_timer = lv_timer_create(batteryGaugeTimerCb, 2000, nullptr);   // the gauge refreshes every 2 s
+  return lh14 + 2 * lh12 + 4;
+}
+#endif
 static void batteryChartClose() {
+#if defined(TLORA_PAGER)
+  batteryGaugeStop();
+#endif
   if (s_batt_chart_root) { popupClose(&s_batt_chart_root); }
 }
 static void batteryChartDismissCb(lv_event_t* e) {
@@ -24664,6 +24736,15 @@ static void openBatteryChartWindow() {
   lv_obj_set_style_text_font(title, &g_font_14, LV_PART_MAIN);
   lv_obj_set_style_text_color(title, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
   lv_obj_set_pos(title, 0, 0);
+#if defined(TLORA_PAGER)
+  // The live gauge first: what the device draws now is what this popup is opened for.
+  const int gauge_y = (int)lv_font_get_line_height(&g_font_14) + 4;
+  const int gauge_h = batteryGaugeBlock(card, gauge_y, cardw - 20 - 34);   // clear of the X
+  const int top_y = gauge_y + gauge_h;
+#else
+  const int top_y = 0;
+#endif
+  (void)top_y;
 
   // Read the log into voltage + cpu arrays (oldest..newest): the newest day of it,
   // since the file is only trimmed now and then. cpu is the 5th column (absent in
@@ -24725,7 +24806,11 @@ static void openBatteryChartWindow() {
     lv_label_set_text(empty, TR("No battery history yet.\n\nLogged every 5 minutes."));
     lv_obj_set_style_text_color(empty, lv_color_hex(COLOR_SUB), LV_PART_MAIN);
     lv_obj_set_style_text_font(empty, &g_font_12, LV_PART_MAIN);
+#if defined(TLORA_PAGER)
+    lv_obj_set_pos(empty, 0, top_y + 6);
+#else
     lv_obj_set_pos(empty, 0, 28);
+#endif
     return;
   }
 
@@ -24747,7 +24832,11 @@ static void openBatteryChartWindow() {
   const int lh12 = 18, lh14 = 18;   // the fixed steps every other board was laid out with
   const int chart_h = 122;
 #endif
+#if defined(TLORA_PAGER)
+  const int chart_x = 30, chart_rpad = 30, chart_y = top_y + 6;
+#else
   const int chart_x = 30, chart_rpad = 30, chart_y = LV_MAX(18, lh14);
+#endif
   lv_obj_t* chart = lv_chart_create(card);
   lv_obj_set_size(chart, cardw - 20 - chart_x - chart_rpad, chart_h);
   lv_obj_set_pos(chart, chart_x, chart_y);
@@ -24808,6 +24897,9 @@ static void openBatteryChartWindow() {
   // estimate (accent headline)
   char est[44];
   batteryEstimateText(eps, mvs, n, (int)full_mv, est, sizeof est);
+#if defined(TLORA_PAGER)
+  est[0] = '\0';   // the gauge's own time left is above; a trend guess beside it only contradicts it
+#endif
   lv_obj_t* el = lv_label_create(card);
   lv_label_set_text(el, est);
   lv_obj_set_style_text_font(el, &g_font_14, LV_PART_MAIN);
@@ -61948,6 +62040,15 @@ static void hwBatteryUpdate(int i) {
     else snprintf(in, sizeof in, "?");
   }
   snprintf(v, sizeof v, "%u.%02u V", mv / 1000u, (mv % 1000u) / 10u);
+#if defined(TLORA_PAGER)
+  // The fuel gauge measures the current: show what the Pager draws (or takes in)
+  // right now instead of the voltage, which says little on a gauged pack.
+  const TLoraPagerBoard::GaugeInfo gi = board.getGaugeInfo();
+  if (gi.valid) {
+    const int ma = gi.current_ma < 0 ? -gi.current_ma : gi.current_ma;
+    snprintf(v, sizeof v, gi.current_ma > 0 ? "+%d mA" : "%d mA", ma);
+  }
+#endif
   const uint32_t h = hwHash(hwHashStr(hwHashStr(2166136261u, in), v), chg);
   if (h == w.memo && w.size == HWS_S) return;
   const bool changed = h != w.memo;
@@ -61977,10 +62078,14 @@ static void hwBatteryUpdate(int i) {
   if (chg) snprintf(a, sizeof a, "%s", TR("Charging"));
   else if (pct >= 0) snprintf(a, sizeof a, "%d%%", pct);
   else snprintf(a, sizeof a, "%s", TR("No reading yet"));
-  const int hl = chg ? -1 : hwBattHoursLeft(mv);
+  int hl = chg ? -1 : hwBattHoursLeft(mv);
+  uint32_t hl_secs = hl >= 0 ? (uint32_t)hl * 3600u : 0;
+#if defined(TLORA_PAGER)
+  if (!chg && gi.valid && gi.to_empty_min != 0xFFFF) { hl = 0; hl_secs = (uint32_t)gi.to_empty_min * 60u; }   // the gauge's own figure
+#endif
   if (hl >= 0) {
     char span[24];
-    hwFmtSpan(span, sizeof span, (uint32_t)hl * 3600u);
+    hwFmtSpan(span, sizeof span, hl_secs);
     snprintf(b, sizeof b, TR("%s \xC2\xB7 about %s left"), v, span);
   } else snprintf(b, sizeof b, "%s", v);
   setLabelIfChanged(w.l[2], a);

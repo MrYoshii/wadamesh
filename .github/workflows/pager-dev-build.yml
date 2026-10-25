@@ -27,6 +27,7 @@ jobs:
           - LilyGo_TDeck_companion_radio_touch
           - ThinkNode_M9_companion_radio_touch
           - LilyGo_TDeck_Max_companion_radio_touch
+          - heltec_v4_tft_companion_radio_usb_tcp_touch
     steps:
       - uses: actions/checkout@v4
 

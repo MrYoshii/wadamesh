@@ -503,6 +503,14 @@ FileImplPtr VFSFileImpl::openNextFile(const char* mode)
     if(file->d_type != DT_REG && file->d_type != DT_DIR) {
         return openNextFile(mode);
     }
+    // The host's readdir() lists "." and ".." (an ESP32 VFS never does). Handed back
+    // as directories, they let a tree walk climb out of the volume: the firmware's
+    // one-time SPIFFS image purge (UITask::begin, "delete any *.jpg / *.png") went
+    // "/" -> "/.." -> "/../.." and deleted the pictures in the folders around the
+    // data directory.
+    if(!strcmp(file->d_name, ".") || !strcmp(file->d_name, "..")) {
+        return openNextFile(mode);
+    }
 
     size_t pathLen = strlen(_path);
     size_t fileNameLen = strlen(file->d_name);

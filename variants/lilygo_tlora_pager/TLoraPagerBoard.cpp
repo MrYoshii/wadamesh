@@ -242,6 +242,18 @@ void TLoraPagerBoard::refreshGauge() {
   if (mv >= 2500 && mv <= 4600) batt_mv_ = mv;
   const uint16_t soc = gauge.getStateOfCharge();
   if (soc <= 100) batt_soc_ = (int)soc;
+  GaugeInfo g;
+  g.valid         = true;
+  g.current_ma    = gauge.getCurrent();
+  g.power_mw      = gauge.getAveragePower();
+  g.remaining_mah = gauge.getRemainingCapacity();
+  g.full_mah      = gauge.getFullChargeCapacity();
+  g.to_empty_min  = gauge.getTimeToEmpty();
+  g.to_full_min   = gauge.getTimeToFull();
+  g.temp_c10      = (int16_t)(gauge.getTemperature() * 10.0f);
+  g.cycles        = gauge.getCycleCount();
+  g.health_pct    = gauge.getStateOfHealth();
+  gauge_info_ = g;
 }
 
 bool TLoraPagerBoard::chargerRead(uint8_t reg, uint8_t& val) {

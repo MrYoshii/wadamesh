@@ -245,14 +245,6 @@ int main(int argc, char** argv) {
     if (s_script.lines.empty()) fprintf(stderr, "[web] script %s is empty or missing\n", script_path.c_str());
   }
   wadaHostMkdirs(s_shot_dir);
-#if defined(WADA_SIM_PAGER)
-  // The Pager's tile cache lives on a LittleFS partition of its own, which the host
-  // build backs with no directory: its relative paths resolve against the working
-  // directory, and the cache's eviction then deletes whatever files sit there. Work
-  // inside the data directory, where that cache belongs anyway.
-  wadaHostMkdirs(wadaHostDataDir());
-  if (chdir(wadaHostDataDir().c_str()) != 0) fprintf(stderr, "[sim] chdir to the data directory failed\n");
-#endif
   setvbuf(stdout, nullptr, _IOLBF, 0);
 
   if (!headless) {

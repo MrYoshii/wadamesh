@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 // T-LoRa Pager simulator: the ES8311 codec, absent.
 #include <stdint.h>

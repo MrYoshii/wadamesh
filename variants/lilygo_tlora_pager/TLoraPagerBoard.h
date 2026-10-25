@@ -109,6 +109,26 @@ public:
     return batt_soc_;
   }
 
+  // Everything else the BQ27220 measures, from the same 2 s refresh. It counts the
+  // charge in and out of the pack, so these are measurements, not estimates from the
+  // voltage. valid is false until the gauge has answered once.
+  struct GaugeInfo {
+    bool     valid;
+    int16_t  current_ma;      // + charging, - drawing from the pack
+    int16_t  power_mw;        // average power, same sign
+    uint16_t remaining_mah;
+    uint16_t full_mah;        // what the gauge has learned the pack holds now
+    uint16_t to_empty_min;    // 0xFFFF = not discharging
+    uint16_t to_full_min;     // 0xFFFF = not charging
+    int16_t  temp_c10;        // pack temperature, 0.1 °C
+    uint16_t cycles;
+    uint16_t health_pct;      // StateOfHealth, %
+  };
+  GaugeInfo getGaugeInfo() {
+    refreshGauge();
+    return gauge_info_;
+  }
+
   const char* getManufacturerName() const{
     return "LilyGo T-LoRa Pager";
   }
@@ -151,6 +171,7 @@ private:
   bool gps_on_ = true;     // GPS_EN as last driven (on from the boot rail bring-up)
   uint16_t batt_mv_ = PAGER_BATT_MILLIVOLTS_FALLBACK;   // the last gauge voltage
   int      batt_soc_ = -1;  // the last in-range gauge state of charge, -1 = none yet
+  GaugeInfo gauge_info_ = {};
   uint32_t batt_ms_ = 0;    // when the gauge was last read, 0 = never
   int8_t   ext_pwr_ = -1;   // externalPowerPresent() cache
   uint8_t  sys_stat_ = 0;   // REG0B as last read

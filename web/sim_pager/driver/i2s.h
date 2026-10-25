@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 // T-LoRa Pager simulator: the legacy ESP-IDF I2S driver API, silent. The Pager's
 // notification tones and WAV playback compile and run against it; nothing plays.
