@@ -163,8 +163,6 @@ public:
 
 private:
   void refreshGauge();
-  bool chargerRead(uint8_t reg, uint8_t& val);
-  bool chargerWrite(uint8_t reg, uint8_t val);
 
   bool expander_ready_ = false;
   bool charger_ready_ = false;
