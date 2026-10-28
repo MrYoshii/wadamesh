@@ -83244,7 +83244,13 @@ void UITask::loop() {
     refreshContactsList();
   }
   PERF_CP("t:threadlist");
+#if defined(TLORA_PAGER) && defined(PAGER_PERF_TRACE)
+  // Candidate: the inbox rebuild (125-260 ms per message) only while the Chats
+  // tab is showing; elsewhere it stays dirty and runs when Chats comes up.
+  if (g_lv.dirty_threads && heavy_ok && getActiveTab() == CHAT_INBOX_TAB_INDEX) {
+#else
   if (g_lv.dirty_threads && heavy_ok) {
+#endif
     refreshThreadLists();
     g_lv.dirty_threads = false;
   }
