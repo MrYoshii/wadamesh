@@ -206,6 +206,7 @@ static lv_timer_t* perfTimerCreate(lv_timer_cb_t cb, uint32_t period, void* ud, 
   return t;
 }
 #define lv_timer_create(cb, period, ud) perfTimerCreate((cb), (period), (ud), #cb)
+#define PERF_CP(tag) uiCp(tag)
 static void perfRefrTramp(lv_timer_t* t) {
   const uint32_t t0 = micros();
   s_perf_refr_cb(t);
@@ -240,6 +241,17 @@ static void perfHookLvgl() {
     if (!rt || rt->timer_cb == perfIndevTramp) continue;
     s_perf_indev_t[k] = rt; s_perf_indev_cb[k] = rt->timer_cb;
     lv_timer_set_cb(rt, perfIndevTramp);
+  }
+  // Everything else (LVGL's animation timer, timers made in other files): wrap
+  // under a generic name so it shows up instead of hiding in "rest".
+  for (lv_timer_t* t = lv_timer_get_next(nullptr); t; t = lv_timer_get_next(t)) {
+    if (t->timer_cb == perfTimerTramp || t->timer_cb == perfRefrTramp || t->timer_cb == perfIndevTramp) continue;
+    if (s_perf_tm_n >= (uint8_t)(sizeof s_perf_tm / sizeof s_perf_tm[0])) break;
+    int slot = -1;
+    for (uint8_t i = 0; i < s_perf_tm_n; ++i) if (s_perf_tm[i].t == t) { slot = i; break; }
+    if (slot < 0) slot = s_perf_tm_n++;
+    s_perf_tm[slot] = { t, t->timer_cb, t->period <= 40 ? "lv:anim-or-30ms" : "lv:other", 0 };
+    lv_timer_set_cb(t, perfTimerTramp);
   }
 }
 static const char* perfTabName();
@@ -6035,6 +6047,9 @@ static void webMirrorTick() {
   s_web_last_send_ms = now;
   webMirrorQueueRegion(rx, ry, rw, rh);
 }
+#endif
+#ifndef PERF_CP
+#define PERF_CP(tag) do {} while (0)
 #endif
 
 #if defined(DOC_CAPTURE)
@@ -82955,6 +82970,7 @@ void UITask::loop() {
   // The clock stands still while the boot splash is up: a boot slower than the
   // timeout locked the T-Deck Pro on its first pass with the splash still on the
   // glass (#762). ScreenIdleClock.h, host-tested.
+  PERF_CP("t:idle");
   ScreenIdleClock::holdWhileSplash(_last_input_ms, (uint32_t)now, s_splash_root != nullptr);
   if (!_screen_off &&
       ScreenIdleClock::due((uint32_t)now, (uint32_t)_last_input_ms, _screen_timeout_ms)) {
@@ -83088,6 +83104,7 @@ void UITask::loop() {
     }
   }
 #endif
+  PERF_CP("t:glance");
   if (s_glance_lit_ms) {
 #if defined(HAS_TDECK_MAX)
     // E-paper glance: after 6 s (the panel only shows it ~1 s after the timer
@@ -83126,6 +83143,7 @@ void UITask::loop() {
     }
   }
 
+  PERF_CP("t:lvready");
 #if defined(HAS_TOUCH_UI)
   if (!g_lv.ready) return;
   rx24Sample(now);   // packets heard per hour, for the lock screen's activity line
@@ -83205,6 +83223,7 @@ void UITask::loop() {
 
   // A repeater echo of one of our sent floods was just counted — repaint the
   // open chat so the sent bubble's repeat tag ticks up live.
+  PERF_CP("t:echo");
   if (the_mesh.takeEchoDirty()) {
     g_lv.dirty_timeline = true;
 #if !defined(HAS_TANMATSU)
@@ -83215,14 +83234,17 @@ void UITask::loop() {
   bool heavy_ok = !g_lv.defer_heavy_refresh || now >= g_lv.heavy_refresh_at_ms;
   if (g_lv.defer_heavy_refresh && heavy_ok) g_lv.defer_heavy_refresh = false;
 
+  PERF_CP("t:contacts");
   if (g_lv.dirty_contacts && getActiveTab() == CONTACTS_TAB_INDEX && heavy_ok && !s_ctd_active) {
     g_lv.dirty_contacts = false;
     refreshContactsList();
   }
+  PERF_CP("t:threadlist");
   if (g_lv.dirty_threads && heavy_ok) {
     refreshThreadLists();
     g_lv.dirty_threads = false;
   }
+  PERF_CP("t:timeline");
   if (g_lv.dirty_timeline && heavy_ok) {
     // Only repaint the detail that is currently open.
     if (g_lv.dm.detail_open) refreshChatDetailAsync(g_lv.dm);
@@ -83231,6 +83253,7 @@ void UITask::loop() {
   }
   // Jump arrows dim to 50% one second after the last scroll activity (every
   // scroll tick re-brightens them via chatUpdateJumpButtons).
+  PERF_CP("t:misc");
   if (!s_jump_dimmed && s_jump_active_ms &&
       (uint32_t)(millis() - s_jump_active_ms) > 1000) {
     if (g_lv.dm.detail_open)      jumpBtnsSetDim(&g_lv.dm, true);
@@ -83246,6 +83269,7 @@ void UITask::loop() {
     mapNoteStorageChanged();
   }
 #endif
+  PERF_CP("t:sd");
 #if CAP_SD || defined(TLORA_PAGER)
   sdHealthTick();   // wedge detect + remount, driven by writer-flagged failures (any task)
   // microSD insert/remove detection — only while the file manager is open, so
@@ -83300,6 +83324,7 @@ void UITask::loop() {
     refreshThreadsFromMesh();
     g_lv.dirty_threads  = true;
   }
+  PERF_CP("th:refresh");
   if (now >= _next_refresh) {
     refreshStatusLabels();
 #if CAP_LUA_APPS && CAP_LUA_SD_LIST
@@ -83336,6 +83361,7 @@ void UITask::loop() {
     }
     _next_refresh = now + UI_REFRESH_MS;
   }
+  PERF_CP("th:tail");
 #if CAP_TRACKBALL
   uiCp("ui:input");
   updateTrackball(now);
