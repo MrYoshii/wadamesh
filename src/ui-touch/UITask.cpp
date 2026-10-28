@@ -77724,7 +77724,11 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
 #else
       const int draw_band_w = 320;
 #endif
+#if defined(TLORA_PAGER) && defined(PAGER_DRAW_BUF_PX)
+      g_draw_buf_px = PAGER_DRAW_BUF_PX;   // test builds: band size A/B (106560 = the whole 480x222 frame)
+#else
       g_draw_buf_px = 12800;
+#endif
       band_psram = true;
 #elif CAP_EPAPER
       // E-paper (T-Deck Pro, Max): the same 240x24 band, in PSRAM. The flush only copies
