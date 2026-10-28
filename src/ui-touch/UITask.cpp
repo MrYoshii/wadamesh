@@ -236,7 +236,7 @@ static void perfHookLvgl() {
   }
   int k = 0;
   for (lv_indev_t* in = lv_indev_get_next(nullptr); in && k < 4; in = lv_indev_get_next(in), ++k) {
-    lv_timer_t* rt = lv_indev_get_read_timer(in);
+    lv_timer_t* rt = in->driver ? in->driver->read_timer : nullptr;   // lv_indev_get_read_timer() is declared with lv_disp_t* in LVGL 8
     if (!rt || rt->timer_cb == perfIndevTramp) continue;
     s_perf_indev_t[k] = rt; s_perf_indev_cb[k] = rt->timer_cb;
     lv_timer_set_cb(rt, perfIndevTramp);
