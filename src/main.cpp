@@ -1821,11 +1821,20 @@ void loop() {
   extern void stallLog(const char* tag, uint32_t dur_ms);
   extern const char* g_ui_stall_tag;
   extern uint16_t    g_ui_stall_max;
+#if defined(TLORA_PAGER) && defined(PAGER_PERF_TRACE)
+#define STALL_SCOPE(tag, call) { uint32_t _st0 = millis(); call; uint32_t _sdt = millis() - _st0; \
+    if (_sdt >= 50) Serial.printf("[PERF] main %s %lums\n", tag, (unsigned long)_sdt); if (_sdt >= 200) stallLog(tag, _sdt); }
+#else
 #define STALL_SCOPE(tag, call) { uint32_t _st0 = millis(); call; uint32_t _sdt = millis() - _st0; if (_sdt >= 200) stallLog(tag, _sdt); }
+#endif
   { uint32_t _ui0 = millis();
     ui_task.loop();
     uint32_t _uidt = millis() - _ui0;
     if (_uidt >= 200) stallLog((g_ui_stall_max >= 150 && g_ui_stall_tag[0]) ? g_ui_stall_tag : "ui:other", _uidt);
+#if defined(TLORA_PAGER) && defined(PAGER_PERF_TRACE)
+    if (_uidt >= 80) Serial.printf("[PERF] ui pass %lums (slowest %s %ums)\n", (unsigned long)_uidt,
+                                   g_ui_stall_tag[0] ? g_ui_stall_tag : "-", (unsigned)g_ui_stall_max);
+#endif
   }
 #endif
 #ifdef MULTI_TRANSPORT_COMPANION

@@ -171,6 +171,102 @@ static void* wadaMp3Scratch() { return s_wada_mp3_scratch; }
 #include "WifiColdStartGate.h" // host-tested: may a Wi-Fi switch start the radio from cold
 #include "ScreenIdleClock.h"   // host-tested: the screen timeout waits for the boot splash (#762)
 #include "NotifyAlert.h"       // host-tested: what a new message sounds and buzzes (#730)
+
+// ---- PAGER_PERF_TRACE: test builds only (never set in a release env) --------
+// Serial log of where a slow UI pass goes: every app LVGL timer by name, the
+// display refresh split into render and panel flush, input reads, and the loop
+// sections. Lines start with [PERF].
+#if defined(TLORA_PAGER) && defined(PAGER_PERF_TRACE)
+struct PerfTimerSlot { lv_timer_t* t; lv_timer_cb_t cb; const char* name; uint32_t us; };
+static PerfTimerSlot s_perf_tm[96];
+static uint8_t  s_perf_tm_n = 0;
+static uint32_t s_perf_refr_us = 0, s_perf_flush_us = 0, s_perf_flush_n = 0, s_perf_flush_px = 0;
+static uint32_t s_perf_indev_us = 0;
+static lv_area_t s_perf_box = { 32767, 32767, -32768, -32768 };
+static lv_timer_cb_t s_perf_refr_cb = nullptr, s_perf_indev_cb[4] = { nullptr };
+static lv_timer_t*   s_perf_indev_t[4] = { nullptr };
+static void perfTimerTramp(lv_timer_t* t) {
+  for (uint8_t i = 0; i < s_perf_tm_n; ++i) {
+    if (s_perf_tm[i].t != t) continue;
+    const uint32_t t0 = micros();
+    s_perf_tm[i].cb(t);
+    s_perf_tm[i].us += micros() - t0;
+    return;
+  }
+}
+static lv_timer_t* perfTimerCreate(lv_timer_cb_t cb, uint32_t period, void* ud, const char* name) {
+  lv_timer_t* t = lv_timer_create(cb, period, ud);
+  if (!t) return t;
+  int slot = -1;
+  for (uint8_t i = 0; i < s_perf_tm_n; ++i) if (s_perf_tm[i].t == t) { slot = i; break; }   // pointer reused
+  if (slot < 0 && s_perf_tm_n < (uint8_t)(sizeof s_perf_tm / sizeof s_perf_tm[0])) slot = s_perf_tm_n++;
+  if (slot < 0) return t;   // table full: runs unwrapped, lands in "rest"
+  s_perf_tm[slot] = { t, cb, name, 0 };
+  lv_timer_set_cb(t, perfTimerTramp);
+  return t;
+}
+#define lv_timer_create(cb, period, ud) perfTimerCreate((cb), (period), (ud), #cb)
+static void perfRefrTramp(lv_timer_t* t) {
+  const uint32_t t0 = micros();
+  s_perf_refr_cb(t);
+  s_perf_refr_us += micros() - t0;
+}
+static void perfIndevTramp(lv_timer_t* t) {
+  for (int i = 0; i < 4; ++i) {
+    if (s_perf_indev_t[i] != t) continue;
+    const uint32_t t0 = micros();
+    s_perf_indev_cb[i](t);
+    s_perf_indev_us += micros() - t0;
+    return;
+  }
+}
+static void perfFlushNote(const lv_area_t* a, uint32_t us) {
+  s_perf_flush_us += us; ++s_perf_flush_n; s_perf_flush_px += (uint32_t)lv_area_get_size(a);
+  if (a->x1 < s_perf_box.x1) s_perf_box.x1 = a->x1;
+  if (a->y1 < s_perf_box.y1) s_perf_box.y1 = a->y1;
+  if (a->x2 > s_perf_box.x2) s_perf_box.x2 = a->x2;
+  if (a->y2 > s_perf_box.y2) s_perf_box.y2 = a->y2;
+}
+// Hook the display refresh and input-read timers once LVGL is up (idempotent).
+static void perfHookLvgl() {
+  lv_disp_t* d = lv_disp_get_default();
+  if (d && d->refr_timer && d->refr_timer->timer_cb != perfRefrTramp) {
+    s_perf_refr_cb = d->refr_timer->timer_cb;
+    lv_timer_set_cb(d->refr_timer, perfRefrTramp);
+  }
+  int k = 0;
+  for (lv_indev_t* in = lv_indev_get_next(nullptr); in && k < 4; in = lv_indev_get_next(in), ++k) {
+    lv_timer_t* rt = lv_indev_get_read_timer(in);
+    if (!rt || rt->timer_cb == perfIndevTramp) continue;
+    s_perf_indev_t[k] = rt; s_perf_indev_cb[k] = rt->timer_cb;
+    lv_timer_set_cb(rt, perfIndevTramp);
+  }
+}
+static const char* perfTabName();
+// One lv_timer_handler() pass: print the split when it was slow.
+static void perfLvglPass(uint32_t total_us) {
+  if (total_us >= 50000) {
+    uint32_t named = 0;
+    char tm[200]; int p = 0; tm[0] = '\0';
+    for (uint8_t i = 0; i < s_perf_tm_n; ++i) {
+      named += s_perf_tm[i].us;
+      if (s_perf_tm[i].us >= 3000 && p < (int)sizeof tm - 40)
+        p += snprintf(tm + p, sizeof tm - p, " %s=%lu", s_perf_tm[i].name, (unsigned long)(s_perf_tm[i].us / 1000));
+    }
+    const uint32_t known = s_perf_refr_us + s_perf_indev_us + named;
+    Serial.printf("[PERF] lvgl %lums  render %lu flush %lu (n=%lu px=%lu box=%d,%d-%d,%d)  input %lu  timers%s  rest %lu  [%s]\n",
+                  (unsigned long)(total_us / 1000),
+                  (unsigned long)((s_perf_refr_us > s_perf_flush_us ? s_perf_refr_us - s_perf_flush_us : 0) / 1000),
+                  (unsigned long)(s_perf_flush_us / 1000), (unsigned long)s_perf_flush_n, (unsigned long)s_perf_flush_px,
+                  (int)s_perf_box.x1, (int)s_perf_box.y1, (int)s_perf_box.x2, (int)s_perf_box.y2,
+                  (unsigned long)(s_perf_indev_us / 1000), tm[0] ? tm : " -",
+                  (unsigned long)((total_us > known ? total_us - known : 0) / 1000), perfTabName());
+  }
+  for (uint8_t i = 0; i < s_perf_tm_n; ++i) s_perf_tm[i].us = 0;
+  s_perf_refr_us = s_perf_flush_us = s_perf_flush_n = s_perf_flush_px = s_perf_indev_us = 0;
+  s_perf_box = { 32767, 32767, -32768, -32768 };
+}
+#endif
 #if defined(DOC_CAPTURE)
 extern int g_cst_debug;          // Constellation.cpp: profiling knob for capture builds
 #endif
@@ -5952,6 +6048,10 @@ static void lvglFlush(lv_disp_drv_t* disp_drv, const lv_area_t* area, lv_color_t
   s_dbg_flush_us += micros() - t;
   s_dbg_flush_px += (uint32_t)lv_area_get_size(area);
   ++s_dbg_flush_n;
+#elif defined(TLORA_PAGER) && defined(PAGER_PERF_TRACE)
+  const uint32_t t = micros();
+  lvglFlushImpl(disp_drv, area, color_p);
+  perfFlushNote(area, micros() - t);
 #else
   lvglFlushImpl(disp_drv, area, color_p);
 #endif
@@ -81341,6 +81441,10 @@ void UITask::newMsgImpl(uint8_t path_len, const char* from_name, const char* tex
                         const char* sender_override) {
   (void)path_len;
   _msgcount = msgcount;
+#if defined(TLORA_PAGER) && defined(PAGER_PERF_TRACE)
+  Serial.printf("[PERF] ---- message in at %lums (%u chars) [%s]\n", (unsigned long)millis(),
+                (unsigned)(text ? strlen(text) : 0), perfTabName());
+#endif
 
   const bool have_sender_override = (sender_override && sender_override[0]);
   bool channel = (g_last_event == UIEventType::channelMessage);
@@ -81825,6 +81929,10 @@ static inline void uiCp(const char* next) {
   const uint32_t nowms = millis();
   const uint32_t dt = nowms - s_ui_cp_t0;
   if (dt > g_ui_stall_max) { g_ui_stall_max = (uint16_t)(dt > 65535 ? 65535 : dt); g_ui_stall_tag = s_ui_cp_tag; }
+#if defined(TLORA_PAGER) && defined(PAGER_PERF_TRACE)
+  if (dt >= 30 && s_ui_cp_tag[0] && strcmp(s_ui_cp_tag, "ui:lvgl") != 0)   // ui:lvgl has its own line
+    Serial.printf("[PERF] section %s %lums\n", s_ui_cp_tag, (unsigned long)dt);
+#endif
   s_ui_cp_tag = next;
   s_ui_cp_t0  = nowms;
 }
@@ -82139,6 +82247,15 @@ static void sdHealthTick() {
 }
 #endif
 
+#if defined(TLORA_PAGER) && defined(PAGER_PERF_TRACE)
+static const char* perfTabName() {
+  static const char* const kTabs[] = { "chats", "contacts", "home", "map", "settings" };
+  static char b[40];
+  const int t = g_lv.tabview ? (int)lv_tabview_get_tab_act(g_lv.tabview) : -1;
+  snprintf(b, sizeof b, "%s%s", (t >= 0 && t < 5) ? kTabs[t] : "?", navOnMainPage() ? "" : "+page");
+  return b;
+}
+#endif
 void UITask::loop() {
   unsigned long now = millis();
 #if defined(HAS_WIO_TRACKER_L2)
@@ -83868,7 +83985,13 @@ void UITask::loop() {
     lv_obj_invalidate(lv_scr_act());
 #endif
   uiCp("ui:lvgl");
-#if defined(TLORA_PAGER)
+#if defined(TLORA_PAGER) && defined(PAGER_PERF_TRACE)
+  perfHookLvgl();
+  const uint32_t perf_lv_t0 = micros();
+  const uint32_t lv_next_ms = lv_timer_handler();
+  perfLvglPass(micros() - perf_lv_t0);
+  if (lv_next_ms >= 2) vTaskDelay(1);
+#elif defined(TLORA_PAGER)
   const uint32_t lv_next_ms = lv_timer_handler();
   // The loop runs flat out, and the keyboard no longer parks it on an I2C read every
   // pass (pagerKeyboardPoll reads only when the chip's INT line asks): when LVGL has
