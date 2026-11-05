@@ -2084,19 +2084,24 @@ static bool        s_max_codec_begun = false;
 // Once Wi-Fi + BLE are running, internal DMA RAM is fragmented down to ~2.4 KB blocks,
 // so an on-demand i2s_driver_install never succeeds. It is installed once at boot
 // (maxAudioPrewarm, while large blocks are still free) and only started/stopped per
-// play; its 4 x 128-sample buffers hold ~1 KB.
+// play; its 4 x 128-frame buffers hold ~2 KB.
 static bool s_max_i2s_installed = false;
+static int  s_max_i2s_rate = 0;
 static bool maxI2sInstallOnce(int rate) {
   if (s_max_i2s_installed) return true;
   i2s_config_t cfg = {};
   cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
   cfg.sample_rate = rate;
   cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
-  cfg.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;   // mono synth/WAV buffer
+  // Stereo with the sample duplicated into both slots (maxI2sWriteMono). A mono
+  // ONLY_LEFT stream is not stable on the S3's legacy driver: install puts it in the
+  // left slot, but any later i2s_set_clk moves it to the right slot, which the ES8311
+  // (reading the left slot) only picked up as faint crosstalk.
+  cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
   cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
   cfg.intr_alloc_flags = 0;
   cfg.dma_buf_count = 4;
-  cfg.dma_buf_len = 128;
+  cfg.dma_buf_len = 128;   // 4 x 128 stereo frames = 2 KB
   cfg.use_apll = false;
   cfg.tx_desc_auto_clear = true;
   esp_err_t e = i2s_driver_install(kI2sPort, &cfg, 0, nullptr);
@@ -2114,14 +2119,30 @@ static bool maxI2sInstallOnce(int rate) {
   e = i2s_set_pin(kI2sPort, &pins);
   if (e != ESP_OK) { Serial.printf("[MAXAUDIO] i2s_set_pin failed %d\n", (int)e); i2s_driver_uninstall(kI2sPort); return false; }
   s_max_i2s_installed = true;
+  s_max_i2s_rate = rate;
+  return true;
+}
+// Write mono samples as duplicated L/R frames.
+static bool maxI2sWriteMono(const int16_t* mono, size_t frames, TickType_t to) {
+  int16_t st[128 * 2];
+  while (frames) {
+    const size_t n = frames > 128 ? 128 : frames;
+    for (size_t i = 0; i < n; ++i) st[2 * i] = st[2 * i + 1] = mono[i];
+    size_t bw = 0;
+    if (i2s_write(kI2sPort, st, n * 2 * sizeof(int16_t), &bw, to) != ESP_OK || bw != n * 2 * sizeof(int16_t))
+      return false;
+    mono += n; frames -= n;
+  }
   return true;
 }
 
 static bool maxAudioInstallRate(int rate) {
   if (!maxI2sInstallOnce(rate)) return false;
-  // Rate only: changing bits/channels would make the driver re-allocate its DMA buffers.
-  esp_err_t e = i2s_set_sample_rates(kI2sPort, (uint32_t)rate);
-  if (e != ESP_OK) { Serial.printf("[MAXAUDIO] i2s_set_sample_rates failed %d rate=%d\n", (int)e, rate); return false; }
+  if (rate != s_max_i2s_rate) {   // same width + channels as installed, so no DMA re-allocation
+    esp_err_t e = i2s_set_clk(kI2sPort, (uint32_t)rate, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_STEREO);
+    if (e != ESP_OK) { Serial.printf("[MAXAUDIO] i2s_set_clk failed %d rate=%d\n", (int)e, rate); return false; }
+    s_max_i2s_rate = rate;
+  }
   i2s_start(kI2sPort);
   if (!s_max_codec_begun) {
     s_max_codec_begun = s_max_codec.begin(Wire, 0x18);
@@ -2161,8 +2182,7 @@ static void maxPlayToneRaw(int freq, int ms) {
       phase += step;
       if (phase > 2.0 * M_PI) phase -= 2.0 * M_PI;
     }
-    size_t bw = 0;
-    i2s_write(kI2sPort, buf, n * sizeof(int16_t), &bw, pdMS_TO_TICKS(200));
+    maxI2sWriteMono(buf, (size_t)n, pdMS_TO_TICKS(200));
   }
   i2s_zero_dma_buffer(kI2sPort);
 }
@@ -2401,8 +2421,7 @@ static bool maxPlayWavFile(const char* prefpath, int volPct) {
       // register, already set above, is doing that.
       out[i] = (ch == 2) ? (int16_t)(((int32_t)in[2*i] + in[2*i+1]) / 2) : in[i];
     }
-    size_t bw = 0;
-    i2s_write(kI2sPort, out, (size_t)frames * sizeof(int16_t), &bw, pdMS_TO_TICKS(300));
+    maxI2sWriteMono(out, (size_t)frames, pdMS_TO_TICKS(300));
     remaining -= (uint32_t)got;
   }
   i2s_zero_dma_buffer(kI2sPort);
@@ -73380,7 +73399,9 @@ static bool luaAudioSinkBegin(uint32_t source_rate, LuaAudioSinkSession* sink,
 
 static bool luaAudioSinkWrite(LuaAudioSinkSession* sink, const int16_t* samples, size_t frames) {
   if (!sink || !sink->open || !samples || !frames) return false;
-#if defined(HAS_TDECK_GT911) || defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)
+#if defined(HAS_TDECK_MAX)
+  return maxI2sWriteMono(samples, frames, pdMS_TO_TICKS(300));
+#elif defined(HAS_TDECK_GT911) || defined(TLORA_PAGER)
   size_t written = 0;
   const size_t bytes = frames * sizeof(int16_t);
   return i2s_write(kI2sPort, samples, bytes, &written, pdMS_TO_TICKS(300)) == ESP_OK &&
