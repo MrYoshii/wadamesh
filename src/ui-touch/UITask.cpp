@@ -1463,6 +1463,9 @@ static bool emojiImgfontPathCb(const lv_font_t* /*font*/, void* img_src, uint16_
   return true;
 }
 static lv_font_t* s_emoji_font[3] = { nullptr, nullptr, nullptr };  // one per text size
+#if EINK_V2
+extern "C" const lv_font_t emoji_mono_16;   // emoji_mono_16.c (monochrome Noto Emoji)
+#endif
 #endif
 
 // UI size (font-based, at native resolution so it stays crisp) is set in
@@ -1736,6 +1739,20 @@ static void initTouchFontFallbacks() {
     if (s_emoji_font[i]) { s_emoji_font[i]->fallback = extras[i]; prim[i]->fallback = s_emoji_font[i]; }
     else                 { prim[i]->fallback = extras[i]; }        // OOM: plain chain
   }
+#if EINK_V2
+  // E-paper: the monochrome emoji first, as a plain bitmap font, so a smiley is a
+  // crisp outline in the text's own colour (white in your black bubble) rather
+  // than colour art cut to one bit. The colour images stay behind it for anything
+  // it lacks.
+  {
+    static lv_font_t s_emoji_mono[3];
+    for (int i = 0; i < 3; ++i) {
+      s_emoji_mono[i] = emoji_mono_16;
+      s_emoji_mono[i].fallback = prim[i]->fallback;
+      prim[i]->fallback = &s_emoji_mono[i];
+    }
+  }
+#endif
 #else
   {
     static lv_font_t s_tail[3], s_missing[3];   // each chain ends extras -> '*' (#673)
@@ -8265,6 +8282,31 @@ static void navMaybeRebuild() {
   s_nav_prev_useTop  = useTop;     // for the same-screen reselect guard above
   if (s_nav_debug) printf("[NAV] rebuilt count=%d %s tab=%d\n", s_nav_count, useTop ? "top" : chat ? "chat" : "tab", getActiveTab());
 }
+
+#if EINK_V2
+// A dimmed backdrop behind a popup (black at 40-70 %) comes out of the one-bit cut
+// as a solid black field: the "black screen" around every menu and sheet. On paper
+// a popup's own black outline sets it apart; the page behind it stays as it was.
+// Applied to whatever covers most of the screen on the top and system layers (and
+// one level inside them), before LVGL draws the frame.
+static void einkFlattenRec(lv_obj_t* o, int depth, lv_coord_t sw, lv_coord_t sh) {
+  if (!o || lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) return;
+  const lv_opa_t opa = lv_obj_get_style_bg_opa(o, LV_PART_MAIN);
+  if (opa > LV_OPA_TRANSP && opa < LV_OPA_COVER &&
+      lv_obj_get_width(o) >= sw * 9 / 10 && lv_obj_get_height(o) >= sh / 2)
+    lv_obj_set_style_bg_opa(o, LV_OPA_TRANSP, LV_PART_MAIN);
+  if (depth >= 1) return;
+  const uint32_t n = lv_obj_get_child_cnt(o);
+  for (uint32_t i = 0; i < n; ++i) einkFlattenRec(lv_obj_get_child(o, i), depth + 1, sw, sh);
+}
+static void einkFlattenBackdrops() {
+  const lv_coord_t sw = lv_disp_get_hor_res(nullptr), sh = lv_disp_get_ver_res(nullptr);
+  for (lv_obj_t* layer : { lv_layer_top(), lv_layer_sys() }) {
+    const uint32_t n = lv_obj_get_child_cnt(layer);
+    for (uint32_t i = 0; i < n; ++i) einkFlattenRec(lv_obj_get_child(layer, i), 0, sw, sh);
+  }
+}
+#endif
 
 #if defined(HAS_TDECK_PRO)
 // Fixed page buttons avoid drag-scrolling the e-paper panel, where every
@@ -61445,7 +61487,11 @@ static void buildGlobalStatusBar() {
   lv_obj_set_size(g_statusbar.dim, lv_disp_get_hor_res(nullptr), STATUSBAR_H * 2);
   lv_obj_set_pos(g_statusbar.dim, 0, 0);
   lv_obj_set_style_bg_color(g_statusbar.dim, lv_color_hex(0x000000), LV_PART_MAIN);
+#if EINK_V2
+  lv_obj_set_style_bg_opa(g_statusbar.dim, LV_OPA_TRANSP, LV_PART_MAIN);   // one bit: 50 % black is solid black
+#else
   lv_obj_set_style_bg_opa(g_statusbar.dim, LV_OPA_50, LV_PART_MAIN);
+#endif
   lv_obj_clear_flag(g_statusbar.dim, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_flag(g_statusbar.dim, LV_OBJ_FLAG_CLICKABLE);   // swallow bar taps behind a modal
   lv_obj_add_flag(g_statusbar.dim, LV_OBJ_FLAG_HIDDEN);
@@ -83942,6 +83988,9 @@ void UITask::loop() {
   // redraws it into the shadow buffer (takeFullRepaint is armed by the WS server).
   if (g_web_mirror.active() && g_web_mirror.takeFullRepaint())
     lv_obj_invalidate(lv_scr_act());
+#endif
+#if EINK_V2
+  einkFlattenBackdrops();
 #endif
   uiCp("ui:lvgl");
 #if defined(TLORA_PAGER)
