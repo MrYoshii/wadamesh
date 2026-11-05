@@ -1,6 +1,14 @@
 #include <Arduino.h>   // needed for PlatformIO
 #include <Mesh.h>
 #include "MyMesh.h"
+#if defined(HAS_TDECK_MAX)
+#include <esp_heap_caps.h>
+#include <mbedtls/platform.h>
+static void* maxMbedtlsCalloc(size_t n, size_t size) {
+  void* p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  return p ? p : heap_caps_calloc(n, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+#endif
 #if defined(ESP32_PLATFORM)
   #include <new>               // placement-new for the PSRAM-resident the_mesh
   #include "esp_heap_caps.h"   // heap_caps_malloc(MALLOC_CAP_SPIRAM)
@@ -803,6 +811,13 @@ void setup() {
   // genuinely needs internal/DMA memory asks for it by capability and is
   // unaffected. Tunable — raise it if something misbehaves.
   heap_caps_malloc_extmem_enable(256);
+#if defined(HAS_TDECK_MAX)
+  // The SDK pins every mbedTLS allocation to internal DRAM (MBEDTLS_INTERNAL_MEM_ALLOC),
+  // and one TLS session needs ~25-40 KB of it -- more than the Max has left once
+  // Wi-Fi and BLE run, so HTTPS (map tiles, OTA) failed outright. Route mbedTLS to
+  // PSRAM; the hardware AES/SHA drivers bounce DMA through small internal buffers.
+  mbedtls_platform_set_calloc_free(maxMbedtlsCalloc, heap_caps_free);
+#endif
 
   // Widen the task-watchdog grace period. The ~5 s default trips during a legitimate-but-slow flash
   // burst — a SPIFFS garbage-collect, or a bulk save (DataStore issues ~12 flash ops per contact,
