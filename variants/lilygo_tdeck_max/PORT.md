@@ -36,6 +36,10 @@ The touch controller is identified at boot: `[BOOT] T-Deck Pro e-paper ready tou
 
 The GPS supply follows the Pro's behaviour: off at boot, on when GPS is enabled, off when it is disabled. On the Pro the provider drives GPIO 39 for this; on the Max `TDeckMaxGps` (a subclass of the wadamesh provider) switches XL9555 line 2 around the provider's `begin()`/`stop()` and reports `isEnabled()` from the rail state.
 
+## LoRa antenna
+
+The SKY13453 on XL9555 line 4 picks the antenna for transmit and receive together: HIGH = the on-board antenna (the boot state), LOW = the external socket. It is the same switchable-antenna feature as the T-Display P4 (`CAP_ANTENNA_SELECT`): Settings > Radio has an Internal / External choice and an "Always use the external antenna" switch, and the control panel an Antenna chip. External sits behind a confirmation (transmitting into an empty socket can damage the radio) and every boot comes back to the on-board antenna unless the "Always" switch is on. There is no per-transmit "Auto" mode on the Max. `[ANT] T-Deck Max antenna: …` in the log shows each change (#777).
+
 ## Not in this port
 
 The A7682E modem, the DRV2605 haptic and the BHI260AP IMU are powered or muxed by the expander but not driven by this build. The Pro's `PIN_PERF_POWERON` radio power-cycle rescue in `main.cpp` compiles out on the Max; a Max equivalent through XL9555 line 1 is a follow-up.

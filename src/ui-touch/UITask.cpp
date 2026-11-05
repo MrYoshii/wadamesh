@@ -16222,8 +16222,19 @@ static void radioScopeDirectToggleCb(lv_event_t* e) {
 // hardware: the T-Display P4's SKY13453 on XL9535 IO1 (HIGH = on-board, LOW = external socket;
 // see Xl9535.h). Modes: 0 on-board, 1 external, 2 the legacy per-transmit toggle (diagnostic).
 enum : uint8_t { ANT_SEL_INTERNAL = 0, ANT_SEL_EXTERNAL = 1, ANT_SEL_AUTO = 2 };
+#if defined(HAS_TDECK_MAX)
+// T-Deck Max: the SKY13453 on XL9555 line 4 switches transmit and receive together (HIGH =
+// internal, LOW = external), so there is no per-transmit mode: Internal or External only.
+#define ANT_SEL_HAS_AUTO 0
+#define ANT_EXT_NAME     TR("External")
+static uint8_t antSelMode()          { return board.antennaExternal() ? ANT_SEL_EXTERNAL : ANT_SEL_INTERNAL; }
+static void    antSelSet(uint8_t m)  { board.setAntennaExternal(m == ANT_SEL_EXTERNAL); }   // takes effect at once
+#else
+#define ANT_SEL_HAS_AUTO 1
+#define ANT_EXT_NAME     "MMCX"
 static uint8_t antSelMode()          { return xl9535.antennaMode(); }
 static void    antSelSet(uint8_t m)  { xl9535.setAntennaMode(m); }   // takes effect on the next transmit
+#endif
 
 // The Radio settings choice applies live and on its own is SESSION-ONLY: every boot re-forces the
 // on-board antenna (the boot-apply in begin() and the park in Xl9535::powerOnSequence), unless the
@@ -16265,7 +16276,7 @@ static void antSelConfirmApply() {
 // transmits on the on-board antenna and only listens on the external socket, so it is not a PA
 // hazard, just permanently lopsided; it gets an accurate performance warning instead.
 static void antSelRequest(uint8_t m) {
-  s_ant_pending = (m > ANT_SEL_AUTO) ? ANT_SEL_INTERNAL : m;
+  s_ant_pending = (m > (ANT_SEL_HAS_AUTO ? ANT_SEL_AUTO : ANT_SEL_EXTERNAL)) ? ANT_SEL_INTERNAL : m;
   if (s_ant_pending == ANT_SEL_INTERNAL ||
       (s_ant_pending == ANT_SEL_EXTERNAL && touchPrefsGetAntExtAlways())) {
     antSelConfirmApply();
@@ -16324,10 +16335,17 @@ static void radioAntAlwaysToggleCb(lv_event_t* e) {
     return;
   }
   lv_obj_clear_state(sw, LV_STATE_CHECKED);   // stays off unless the confirm turns it on
+#if defined(HAS_TDECK_MAX)
+  showConfirm(TR("Always use the external antenna?\n\nThe radio will start on the external "
+                 "socket at every boot. Transmitting without an antenna attached can damage the "
+                 "radio.\n\nOnly turn this on if your external antenna stays connected."),
+              TR("Turn on"), antAlwaysConfirmApply);
+#else
   showConfirm(TR("Always use the external antenna?\n\nThe radio will start on the external (MMCX) "
                  "socket at every boot. Transmitting without an antenna attached can damage the "
                  "radio.\n\nOnly turn this on if your external antenna stays connected."),
               TR("Turn on"), antAlwaysConfirmApply);
+#endif
 }
 #endif
 #if defined(HELTEC_LORA_V4_TFT)
@@ -16559,6 +16577,15 @@ static void buildRadioSettings() {
     // switch below is on; External sits behind a confirmation, because keying the PA into an
     // empty socket is how one gets destroyed. "Auto" keeps the old per-transmit toggle for
     // comparison only (sends on-board, listens external).
+#if defined(HAS_TDECK_MAX)
+    s_ant_dd = setDropdownRow(c, "LoRa antenna",
+                   "Only pick External with an antenna fitted to the external socket. After a reboot it starts on the on-board antenna, unless the switch below is on.",
+                   TR("Internal (on-board)\nExternal"),
+                   antSelMode(), radioAntennaSelectCb);   // live state, not a stored pref
+    s_ant_always_sw = setSwitchRow(c, "Always use the external antenna",
+                   "Starts on the external socket at every boot. Only for an antenna that stays connected.",
+                   touchPrefsGetAntExtAlways(), radioAntAlwaysToggleCb);
+#else
     s_ant_dd = setDropdownRow(c, "LoRa antenna (P4)",
                    "Only pick External with an antenna fitted to the external socket. After a reboot it starts on the on-board antenna, unless the switch below is on.",
                    TR("Internal (on-board)\nExternal (MMCX)\nAuto (legacy, per transmit)"),
@@ -16566,6 +16593,7 @@ static void buildRadioSettings() {
     s_ant_always_sw = setSwitchRow(c, "Always use the external antenna (MMCX)",
                    "Starts on the external socket at every boot. Only for an antenna that stays connected.",
                    touchPrefsGetAntExtAlways(), radioAntAlwaysToggleCb);
+#endif
     lv_obj_add_event_cb(s_ant_dd, antSelWidgetDeleteCb, LV_EVENT_DELETE, nullptr);
     lv_obj_add_event_cb(s_ant_always_sw, antSelWidgetDeleteCb, LV_EVENT_DELETE, nullptr);
 #endif
@@ -57777,7 +57805,7 @@ static void openControlCenter() {
   {
     const bool ext = antSelMode() == ANT_SEL_EXTERNAL;
     ccToggle(row, UI_ICON_ANTENNA, TR("Antenna"), ext, ccAntennaCb, tw, th,
-             CAT_RADIO, ext ? "MMCX" : TR("On-board"));
+             CAT_RADIO, ext ? ANT_EXT_NAME : TR("On-board"));
   }
 #endif
 #if CC_HAS_SAVER

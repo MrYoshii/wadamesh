@@ -97,6 +97,13 @@ public:
   void gpsPowerOff();
   bool gpsPowerIsOn() const { return gps_on_; }
 
+  // LoRa antenna (SKY13453 on XL9555 line 4, transmit and receive together): HIGH =
+  // the on-board antenna, LOW = the external socket. The boot state is the on-board
+  // one; the UI re-applies its choice (on-board unless "Always use the external
+  // antenna" is on). Returns false, and changes nothing, if the expander write failed.
+  bool setAntennaExternal(bool external);
+  bool antennaExternal() const { return ant_external_; }
+
   // Speaker path, mirroring LilyGo's ES8311 examples (examples/ES8311/playWAV):
   // AUDIO_SEL LOW = ES8311 codec, HIGH = A7682E modem; AMP_EN HIGH enables the
   // NS4150B speaker amplifier. The amp is parked OFF at idle to save battery;
@@ -112,5 +119,6 @@ public:
 private:
   bool expander_ready_ = false;
   bool gps_on_ = false;
+  bool ant_external_ = false;
   SemaphoreHandle_t expander_mutex_ = nullptr;
 };

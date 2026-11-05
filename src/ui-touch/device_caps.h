@@ -486,10 +486,11 @@
 #endif
 
 // A switchable LoRa antenna: an on-board antenna plus an external socket, picked at
-// run time (T-Display P4: SKY13453 on XL9535 IO1). Gates the Radio settings antenna
-// rows, the "Always use the external antenna" boot option and the control panel
-// antenna tile. The board glue lives in UITask.cpp (antSelMode/antSelSet).
-#if defined(HAS_TDISPLAY_P4)
+// run time (T-Display P4: SKY13453 on XL9535 IO1; T-Deck Max: SKY13453 on XL9555
+// line 4). Gates the Radio settings antenna rows, the "Always use the external
+// antenna" boot option and the control panel antenna tile. The board glue lives in
+// UITask.cpp (antSelMode/antSelSet).
+#if defined(HAS_TDISPLAY_P4) || defined(HAS_TDECK_MAX)
   #define CAP_ANTENNA_SELECT 1
 #else
   #define CAP_ANTENNA_SELECT 0

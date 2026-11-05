@@ -100,6 +100,13 @@ void TDeckMaxBoard::gpsPowerOff() {
   if (xlWrite(TDMAX_XL_GPS_EN, false)) gps_on_ = false;
 }
 
+bool TDeckMaxBoard::setAntennaExternal(bool external) {
+  if (!xlWrite(TDMAX_XL_LORA_SEL, !external)) return false;
+  ant_external_ = external;
+  Serial.printf("[ANT] T-Deck Max antenna: %s\n", external ? "external" : "on-board");
+  return true;
+}
+
 void TDeckMaxBoard::setAmpEnabled(bool on) {
   if (!expander_ready_) { Serial.println("[MAXAUDIO] amp toggle skipped: expander not ready"); return; }
   // Route the shared speaker to the ES8311 before the amp comes up, so a
