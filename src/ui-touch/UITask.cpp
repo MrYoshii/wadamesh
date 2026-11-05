@@ -49950,12 +49950,18 @@ static void updatePagerTabHold(uint32_t now) {
 // UNCONDITIONALLY, even while the screen is off/locked -- forcing it dark in
 // that state is exactly its job here, so (unlike updatePagerBackspaceHold,
 // which must NOT act while off) it can't be skipped the same way.
+#if defined(HAS_TDECK_MAX)
+static bool s_max_frontlight_on = false;   // the front-light as the heart pad left it
+#endif
 static void updatePagerKbBacklight(unsigned long now) {
   uint8_t kb_bl = 0;
   if (s_kb_bl_mode == 1) kb_bl = 255;
   else if (s_kb_bl_mode == 2 && kbBacklightAutoActive(now)) kb_bl = 255;
   if (g_lv.task && (g_lv.task->isScreenOff() || g_lv.task->isManualLock())) kb_bl = 0;
   if (s_pin_root && g_lv.task && !g_lv.task->isScreenOff()) kb_bl = 255;   // the PIN screen lights the keys
+#if defined(HAS_TDECK_MAX)
+  if (s_max_frontlight_on) kb_bl = 255;   // the heart pad's light is the screen's and the keys' together
+#endif
   // 255 is a valid first value (On, or Auto during the initial activity window),
   // so an uint8_t 0xFF sentinel would skip LEDC attachment and leave the light dark.
   static int s_last = -1;
@@ -57069,7 +57075,6 @@ static uint8_t s_brightness_pct = 100;
 // by the control-centre slider at the slider's level or by the heart pad below
 // the glass; put out by the heart pad again or by the idle screen timeout; a
 // screen wake never re-lights it.
-static bool s_max_frontlight_on = false;
 static void maxFrontlightOff() {
   s_max_frontlight_on = false;
   display.setBrightness(0);
@@ -80964,6 +80969,15 @@ static void maxGoHome() {
   if (LvChatPanel* cp = navOpenChatPanel()) closeChatPanel(cp);
   navGoToMainTab(HOME_TAB_INDEX);
 }
+// The send pad: straight to the chats, from wherever (popups and an open chat closed).
+static void maxGoChats() {
+  accentBoxHide();
+  mentionBoxHide();
+  for (int i = 0; i < 4 && anyPopupOpen(); ++i) hwKeyDismissTopPopup();
+  if (s_apppage_close) s_apppage_close();
+  if (LvChatPanel* cp = navOpenChatPanel()) closeChatPanel(cp);
+  navGoToMainTab(CHAT_INBOX_TAB_INDEX);
+}
 #endif
 
 // The time on a dark-screen glance: the lock screen's face, or where there is no lock
@@ -82948,7 +82962,8 @@ void UITask::loop() {
   // back off from underneath them; just stop tracking it and let the normal
   // idle timeout (already bumped by that real input) take over.
 #if defined(HAS_TDECK_MAX)
-  {   // Front pads: heart toggles the front-light (Meck's shortcut on this board).
+  {   // Front pads, left to right: heart = the front-light and the keyboard light
+      // together, bubble = Home, send = the chats (Meck's ids 0, 1, 2).
     uint8_t key_id = 0;
     if (display.takeFrontKeyPress(key_id)) {
       if (_manual_lock) {
@@ -82964,8 +82979,12 @@ void UITask::loop() {
         if (_screen_off) wakeScreen();
         if (s_max_frontlight_on) maxFrontlightOff(); else maxFrontlightOn();
         _last_input_ms = millis();
-      } else if (key_id == 1) {   // bubble pad: Home (Meck's id; confirm with the [key] line)
+      } else if (key_id == 1) {   // middle (bubble) pad: Home
         if (_screen_off) wakeScreen(); else maxGoHome();
+        _last_input_ms = millis();
+      } else if (key_id == 2) {   // right (send) pad: the chats
+        if (_screen_off) wakeScreen();
+        maxGoChats();
         _last_input_ms = millis();
       }
     }
