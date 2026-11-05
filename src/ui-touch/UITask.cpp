@@ -2080,13 +2080,14 @@ static void pagerPlayToneRaw(int freq, int ms) {
 static Es8311Codec s_max_codec;
 static bool        s_max_codec_begun = false;
 
-static bool maxAudioInstallRate(int rate) {
-  // 4 x 256-sample DMA buffers + driver state come to ~5 KB of internal RAM.
-  if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) < 6 * 1024) {
-    Serial.printf("[MAXAUDIO] no internal heap (largest dma blk %u)\n",
-                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
-    return false;
-  }
+// The I2S driver stays RESIDENT on the Max (unlike the T-Deck, which installs per tone).
+// Once Wi-Fi + BLE are running, internal DMA RAM is fragmented down to ~2.4 KB blocks,
+// so an on-demand i2s_driver_install never succeeds. It is installed once at boot
+// (maxAudioPrewarm, while large blocks are still free) and only started/stopped per
+// play; its 4 x 128-sample buffers hold ~1 KB.
+static bool s_max_i2s_installed = false;
+static bool maxI2sInstallOnce(int rate) {
+  if (s_max_i2s_installed) return true;
   i2s_config_t cfg = {};
   cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
   cfg.sample_rate = rate;
@@ -2095,11 +2096,15 @@ static bool maxAudioInstallRate(int rate) {
   cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
   cfg.intr_alloc_flags = 0;
   cfg.dma_buf_count = 4;
-  cfg.dma_buf_len = 256;
+  cfg.dma_buf_len = 128;
   cfg.use_apll = false;
   cfg.tx_desc_auto_clear = true;
   esp_err_t e = i2s_driver_install(kI2sPort, &cfg, 0, nullptr);
-  if (e != ESP_OK) { Serial.printf("[MAXAUDIO] i2s_driver_install failed %d rate=%d\n", (int)e, rate); return false; }
+  if (e != ESP_OK) {
+    Serial.printf("[MAXAUDIO] i2s_driver_install failed %d rate=%d (largest dma blk %u)\n", (int)e, rate,
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
+    return false;
+  }
   i2s_pin_config_t pins = {};
   pins.mck_io_num   = PIN_I2S_MCLK;
   pins.bck_io_num   = PIN_I2S_BCK;
@@ -2108,13 +2113,23 @@ static bool maxAudioInstallRate(int rate) {
   pins.data_in_num  = I2S_PIN_NO_CHANGE;
   e = i2s_set_pin(kI2sPort, &pins);
   if (e != ESP_OK) { Serial.printf("[MAXAUDIO] i2s_set_pin failed %d\n", (int)e); i2s_driver_uninstall(kI2sPort); return false; }
+  s_max_i2s_installed = true;
+  return true;
+}
+
+static bool maxAudioInstallRate(int rate) {
+  if (!maxI2sInstallOnce(rate)) return false;
+  // Rate only: changing bits/channels would make the driver re-allocate its DMA buffers.
+  esp_err_t e = i2s_set_sample_rates(kI2sPort, (uint32_t)rate);
+  if (e != ESP_OK) { Serial.printf("[MAXAUDIO] i2s_set_sample_rates failed %d rate=%d\n", (int)e, rate); return false; }
+  i2s_start(kI2sPort);
   if (!s_max_codec_begun) {
     s_max_codec_begun = s_max_codec.begin(Wire, 0x18);
     Serial.printf("[MAXAUDIO] codec begin %s\n", s_max_codec_begun ? "ok" : "FAILED");
-    if (!s_max_codec_begun) { i2s_driver_uninstall(kI2sPort); return false; }
+    if (!s_max_codec_begun) { i2s_stop(kI2sPort); return false; }
   }
-  if (!s_max_codec.start((uint32_t)rate)) { Serial.printf("[MAXAUDIO] codec start FAILED rate=%d\n", rate); i2s_driver_uninstall(kI2sPort); return false; }
-  Serial.printf("[MAXAUDIO] installed rate=%d mclk=%d bck=%d ws=%d dout=%d\n", rate, (int)PIN_I2S_MCLK, (int)PIN_I2S_BCK, (int)PIN_I2S_WS, (int)PIN_I2S_DOUT);
+  if (!s_max_codec.start((uint32_t)rate)) { Serial.printf("[MAXAUDIO] codec start FAILED rate=%d\n", rate); i2s_stop(kI2sPort); return false; }
+  Serial.printf("[MAXAUDIO] started rate=%d\n", rate);
   return true;
 }
 static bool maxAudioInstall() { return maxAudioInstallRate(kI2sSampleRate); }
@@ -2122,7 +2137,7 @@ static void maxAudioUninstall() {
   s_max_codec.setMute(true);
   s_max_codec.suspend();
   i2s_zero_dma_buffer(kI2sPort);
-  i2s_driver_uninstall(kI2sPort);
+  i2s_stop(kI2sPort);   // driver stays installed -- see maxI2sInstallOnce
 }
 
 // Render `freq` Hz for `ms` ms into the already-installed I2S as a 16-bit
@@ -2440,16 +2455,27 @@ static void maxNotifyTaskFn(void* arg) {
     s_notify_playing = false;
   }
 }
-static bool maxNotifyKick() {
+static bool maxNotifyWorkerEnsure() {
   if (!s_max_notify_task) {
     static StackType_t  stack[6144];
     static StaticTask_t tcb;
     s_max_notify_task = xTaskCreateStatic(maxNotifyTaskFn, "notify", sizeof stack / sizeof stack[0],
                                           nullptr, 3, stack, &tcb);
-    if (!s_max_notify_task) { Serial.println("[MAXAUDIO] notify worker create FAILED"); return false; }
+    if (!s_max_notify_task) Serial.println("[MAXAUDIO] notify worker create FAILED");
   }
+  return s_max_notify_task != nullptr;
+}
+static bool maxNotifyKick() {
+  if (!maxNotifyWorkerEnsure()) return false;
   xTaskNotifyGive(s_max_notify_task);
   return true;
+}
+// Boot-time setup, before the radio stacks fragment internal RAM: install the resident
+// I2S driver (left stopped) and start the notify worker (it idles until kicked).
+static void maxAudioPrewarm() {
+  if (maxI2sInstallOnce(kI2sSampleRate)) i2s_stop(kI2sPort);
+  maxNotifyWorkerEnsure();
+  Serial.printf("[MAXAUDIO] prewarm i2s=%d worker=%d\n", (int)s_max_i2s_installed, s_max_notify_task != nullptr);
 }
 
 static void maxPlayNotifySlot(int slot) {
@@ -77818,6 +77844,7 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
       s_brightness_pct = pct;
       maxFrontlightOff();   // file-scope helper: uses the global panel, not this function's DisplayDriver* parameter
     }
+    maxAudioPrewarm();      // resident I2S + notify worker, while internal RAM is still unfragmented
 #else
     applyBrightness(touchPrefsGetBrightness());
 #endif
