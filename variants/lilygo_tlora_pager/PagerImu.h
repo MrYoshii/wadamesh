@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // T-LoRa Pager IMU — Bosch BHI260AP smart sensor hub on the shared I2C bus
-// (Wire, SDA 3 / SCL 2) at 0x28, interrupt on GPIO 8 (unused here: polled).
+// (Wire, SDA 3 / SCL 2) at 0x28, interrupt on GPIO 8 (unused here: polled). The
+// T-Deck Max carries the same hub at 0x28 on its own shared bus (1.8 V rail on
+// XL9555 line 3, on from boot; INT on GPIO 21, also unused).
 //
 // The BHI260AP is a microcontroller of its own and boots from RAM: until the
 // host uploads its firmware (~120 KB, the Klio image LilyGoLib uses on this
@@ -15,7 +17,7 @@
 // (LilyGoLib's own remap for this board: BOTTOM_LAYER_TOP_LEFT_CORNER).
 #pragma once
 
-#if defined(TLORA_PAGER) && defined(ESP32)
+#if (defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)) && defined(ESP32)
 
 /** Latest acceleration in g. The first call uploads the hub firmware (blocks
  *  for a second or two, once per boot) and starts the accelerometer; later

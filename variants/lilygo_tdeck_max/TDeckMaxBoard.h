@@ -39,13 +39,14 @@
 
 // Boot state, written to both output ports in one go before the lines are
 // switched to outputs: LoRa on, 1.8 V on, internal antenna, touch and keyboard
-// resets released; modem, motor and amplifier off; audio mux to the ES8311.
+// resets released, the vibration driver's supply on (the DRV2605 sits in standby
+// between patterns, a few uA); modem and amplifier off; audio mux to the ES8311.
 //
 // GPS is deliberately OFF here. On the T-Deck Pro the GPS rail is GPIO 39 and
 // the location provider drives it: off at boot, on when GPS is enabled, off
 // again when it is disabled. The Max keeps that behaviour by routing the same
 // calls to this expander line (see TDeckMaxGps.h).
-#define TDMAX_XL_BOOT_PORT0 0x9A   // 1001 1010: T_RST=1 AMP=0 MOT=0 LSEL=1 1V8=1 GPS=0 LORA=1 6609=0
+#define TDMAX_XL_BOOT_PORT0 0xBA   // 1011 1010: T_RST=1 AMP=0 MOT=1 LSEL=1 1V8=1 GPS=0 LORA=1 6609=0
 #define TDMAX_XL_BOOT_PORT1 0x02   // 0000 0010: ASEL=0 KRST=1 PKEY=0
 
 // Gauge probe/refresh failed -- never let the UI divide by zero.

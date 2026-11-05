@@ -641,7 +641,7 @@ bool    touchPrefsGetLockPreviews();           // message text on the lock scree
 void    touchPrefsSetLockPreviews(bool on);
 bool    touchPrefsGetGlanceWhenLocked();       // "at a glance" also fires while manually/idle locked, not just unlocked+dimmed (default false)
 void    touchPrefsSetGlanceWhenLocked(bool on);
-#if defined(TLORA_PAGER)
+#if defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)
 bool    touchPrefsGetVibrateInput();          // Pager: a click per key / knob detent (default false)
 void    touchPrefsSetVibrateInput(bool on);
 uint8_t touchPrefsGetVibrateKeyLevel();       // 0 off, 1 light, 2 strong (the vib_in key; its old "on" = strong)
@@ -673,7 +673,7 @@ void     touchPrefsSetBattDayMah(uint32_t v); // (0xFFFF = not known). Not in th
 uint32_t touchPrefsGetBattUse();             // average draw on battery: 0.1 mA low 16 bits, minutes seen high
 void     touchPrefsSetBattUse(uint32_t v);
 #endif
-#if defined(TLORA_PAGER)
+#if defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)
 bool     touchPrefsGetFaceDownQuiet();       // lying face down: screen off, no sound or vibration (default off)
 void     touchPrefsSetFaceDownQuiet(bool on);
 bool     touchPrefsGetPickupWake();          // lifting it off a table lights the screen (default off)

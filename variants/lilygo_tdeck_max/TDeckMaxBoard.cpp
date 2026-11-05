@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "TDeckMaxBoard.h"
 #include <Preferences.h>
+#include "PagerHaptics.h"   // DRV2605 vibration motor (variants/lilygo_tlora_pager, shared)
 #define XPOWERS_CHIP_SY6970
 #include <XPowersLib.h>   // PowersSY6970: the charger
 
@@ -94,6 +95,9 @@ void TDeckMaxBoard::begin() {
     if (stat >= 0) sys_stat_ = (uint8_t)stat;
   }
   Serial.printf("[BOOT] T-Deck Max sy6970 %s\n", charger_ready_ ? "ok" : "PROBE FAILED");
+
+  // DRV2605 vibration driver: its supply came up with the boot state above.
+  if (expander_ready_) pagerHapticsBegin();
 
   // ES8311 codec presence check (address only -- no register writes yet, that
   // is the sound code's job on first use, same as the pager). Every rail this

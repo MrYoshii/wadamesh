@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "PagerImu.h"
 
-#if defined(TLORA_PAGER) && defined(ESP32)
+#if (defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)) && defined(ESP32)
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -32,9 +32,17 @@ static void accelCb(uint8_t sensor_id, uint8_t* data, uint32_t len, uint64_t* ts
   struct bhy2_data_xyz v;
   bhy2_parse_xyz(data, &v);
   const float k = s_bhy.getScaling(sensor_id);   // 1/4096 g per count
+#if defined(HAS_TDECK_MAX)
+  // The Max's hub sits the other way up: turned about the y axis, so x and z
+  // flip (screen up reads +1 g on z, as the motion code expects).
+  s_x = -v.x * k;
+  s_y = v.y * k;
+  s_z = -v.z * k;
+#else
   s_x = v.x * k;
   s_y = v.y * k;
   s_z = v.z * k;
+#endif
   s_sample_ms = millis();
 }
 
@@ -54,7 +62,10 @@ static bool imuStart() {
   s_ready = s_bhy.begin(Wire, PAGER_IMU_ADDR);
   Wire.setClock(was ? was : 100000UL);
   if (s_ready) {
+#if defined(TLORA_PAGER)
     s_bhy.setRemapAxes(SensorBHI260AP::BOTTOM_LAYER_TOP_LEFT_CORNER);
+#endif
+    // (The Max: no remap; accelCb turns its axes the right way up.)
     s_ready = s_bhy.onResultEvent(SensorBHI260AP::ACCEL_PASSTHROUGH, accelCb);
   }
   Serial.printf("[IMU] bhi260ap %s (%lu ms)\n", s_ready ? "ok" : "FAILED",
@@ -89,4 +100,4 @@ void pagerImuIdleTick() {
   s_sample_ms = 0;
 }
 
-#endif  // TLORA_PAGER && ESP32
+#endif  // (TLORA_PAGER || HAS_TDECK_MAX) && ESP32

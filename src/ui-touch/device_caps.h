@@ -550,7 +550,7 @@
 // hardware gate as CAP_COMPASS: the ThinkNode M9's QMI8658 is the only one
 // driven so far (variants/thinknode_m9/M9Imu.*). Its point is tilt — a 2-axis
 // magnetic heading is wrong by ~1.5 degrees per degree of tilt at mid latitudes.
-#if defined(HAS_M9_IMU) || defined(TLORA_PAGER)   // + the Pager's BHI260AP (variants/lilygo_tlora_pager/PagerImu.*)
+#if defined(HAS_M9_IMU) || defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)   // + the Pager's and the Max's BHI260AP (variants/lilygo_tlora_pager/PagerImu.*)
   #define CAP_IMU 1
 #else
   #define CAP_IMU 0
@@ -571,6 +571,18 @@
   #define BATT_DEV_NAME "T-Deck"
 #else
   #define BATT_DEV_NAME "Pager"
+#endif
+
+// The DRV2605 vibration motor with the Pager's settings (strength, a pattern per
+// message kind, key clicks; variants/lilygo_tlora_pager/PagerHaptics.*), and the
+// BHI260AP motion features on top of CAP_IMU (quiet when face down, wake when picked
+// up). The Pager and the T-Deck Max, which carry the same two chips.
+#if defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)
+  #define CAP_DRV_HAPTICS 1
+  #define CAP_MOTION_QUIET 1
+#else
+  #define CAP_DRV_HAPTICS 0
+  #define CAP_MOTION_QUIET 0
 #endif
 
 // The constellation screensaver's optional note left of the battery

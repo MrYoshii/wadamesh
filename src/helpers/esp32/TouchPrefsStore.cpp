@@ -2377,7 +2377,7 @@ void touchPrefsSetSoundDirect(bool on) { if (!s_begun) touchPrefsBegin(); prefsP
 // (DRV2605) is the exception: buzzing for messages is what a pager is for.
 bool touchPrefsGetVibrate() {
   if (!s_begun) touchPrefsBegin();
-#if defined(TLORA_PAGER)
+#if defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)
   return s_prefs.getUChar("vibrate", 1) != 0;
 #else
   return s_prefs.getUChar("vibrate", 0) != 0;
@@ -2534,7 +2534,7 @@ bool touchPrefsGetLockPreviews() { if (!s_begun) touchPrefsBegin(); return s_pre
 void touchPrefsSetLockPreviews(bool on) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("lock_prev", on ? 1 : 0); }
 bool touchPrefsGetGlanceWhenLocked() { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("glance_lck", 0) != 0; }
 void touchPrefsSetGlanceWhenLocked(bool on) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("glance_lck", on ? 1 : 0); }
-#if defined(TLORA_PAGER)   // the Pager's DRV2605 vibration motor
+#if defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)   // the DRV2605 vibration motor (Pager, Max)
 bool touchPrefsGetVibrateInput()        { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("vib_in", 0) != 0; }
 void touchPrefsSetVibrateInput(bool on) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("vib_in", on ? 1 : 0); }
 // vib_in: 0 off, 1 strong (what the old on/off switch stored), 2 light.
@@ -2579,7 +2579,7 @@ void     touchPrefsSetBattDayMah(uint32_t v) { if (!s_begun) touchPrefsBegin(); 
 uint32_t touchPrefsGetBattUse()          { if (!s_begun) touchPrefsBegin(); return s_prefs.getUInt("bat_use", 0); }
 void     touchPrefsSetBattUse(uint32_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUInt("bat_use", v); }
 #endif
-#if defined(TLORA_PAGER)
+#if defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)
 bool touchPrefsGetFaceDownQuiet()       { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("face_down", 0) != 0; }
 void touchPrefsSetFaceDownQuiet(bool on) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("face_down", on ? 1 : 0); }
 bool touchPrefsGetPickupWake()         { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("pick_wake", 0) != 0; }
@@ -3048,8 +3048,8 @@ static int backupKeys(BkKey* out, int cap) {
     "snd_msg", "snd_men", "snd_dm", "snd_vol", "vibrate", "vib_pat", "ign_tiny", "dsc_evict", "dsc_hops",
     "ent_send", "clk_12h", "nav_mbk", "tb_rev", "tb_edgesc", "lock_off", "glance_lck",
     "glance_en", "msg_led", "dnd_en", "dnd_ss", "dnd_es", "kbd_bl",
-#if defined(TLORA_PAGER)
-    "vib_in", "vib_str", "vib_pm", "vib_pd", "vib_pn",   // the Pager's vibration settings ("vibrate" is above)
+#if defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)
+    "vib_in", "vib_str", "vib_pm", "vib_pd", "vib_pn",   // the vibration settings ("vibrate" is above)
     "face_down", "pick_wake",                                     // the Pager's quiet modes
 #endif
 #if defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)
