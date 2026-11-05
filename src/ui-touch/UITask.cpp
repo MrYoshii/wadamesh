@@ -2081,7 +2081,12 @@ static Es8311Codec s_max_codec;
 static bool        s_max_codec_begun = false;
 
 static bool maxAudioInstallRate(int rate) {
-  if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 16 * 1024) { Serial.println("[MAXAUDIO] no internal heap"); return false; }
+  // 4 x 256-sample DMA buffers + driver state come to ~5 KB of internal RAM.
+  if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) < 6 * 1024) {
+    Serial.printf("[MAXAUDIO] no internal heap (largest dma blk %u)\n",
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
+    return false;
+  }
   i2s_config_t cfg = {};
   cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
   cfg.sample_rate = rate;
@@ -2393,8 +2398,7 @@ static bool maxPlayWavFile(const char* prefpath, int volPct) {
 
 // Mirrors pagerNotifyTaskFn, bracketed with the amp's AMP_EN toggle (muted/
 // off at idle to save battery) and the audio-mux select (LOW = ES8311).
-static void maxNotifyTaskFn(void* arg) {
-  (void)arg;
+static void maxNotifyPlayOnce() {
   const int volPct = s_notify_vol;
   Serial.printf("[MAXAUDIO] notify task slot=%d vol=%d path='%s'\n", (int)s_notify_slot, volPct, s_notify_path);
   board.selectEs8311Audio();
@@ -2420,8 +2424,32 @@ static void maxNotifyTaskFn(void* arg) {
   }
   Serial.println("[MAXAUDIO] notify task done");
   board.setAmpEnabled(false);
-  s_notify_playing = false;
-  vTaskDelete(nullptr);
+}
+
+// One long-lived worker with a statically allocated stack. With Wi-Fi + BLE up the
+// Max has only ~24 KB of internal heap left (largest block ~16 KB), so spawning a
+// fresh 8 KB task per chime failed silently once the heap fragmented. The static
+// stack is reserved at link time, so the worker always exists; it sleeps on a task
+// notification between plays.
+static TaskHandle_t s_max_notify_task = nullptr;
+static void maxNotifyTaskFn(void* arg) {
+  (void)arg;
+  for (;;) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    maxNotifyPlayOnce();
+    s_notify_playing = false;
+  }
+}
+static bool maxNotifyKick() {
+  if (!s_max_notify_task) {
+    static StackType_t  stack[6144];
+    static StaticTask_t tcb;
+    s_max_notify_task = xTaskCreateStatic(maxNotifyTaskFn, "notify", sizeof stack / sizeof stack[0],
+                                          nullptr, 3, stack, &tcb);
+    if (!s_max_notify_task) { Serial.println("[MAXAUDIO] notify worker create FAILED"); return false; }
+  }
+  xTaskNotifyGive(s_max_notify_task);
+  return true;
 }
 
 static void maxPlayNotifySlot(int slot) {
@@ -2431,9 +2459,7 @@ static void maxPlayNotifySlot(int slot) {
   s_notify_vol = (int)touchPrefsGetSoundVolume();   // 0..100 -> the codec's hw volume register
   touchPrefsGetSoundFile(slot, s_notify_path, sizeof s_notify_path);
   s_notify_playing = true;
-  if (xTaskCreate(maxNotifyTaskFn, "notify", 8192, nullptr, 3, nullptr) != pdPASS) {
-    s_notify_playing = false;
-  }
+  if (!maxNotifyKick()) s_notify_playing = false;
 }
 static void maxPreviewWavFile(const char* prefpath) {
   if (tileFetchPendingLoad() > 0 || s_notify_playing) return;
@@ -2442,8 +2468,7 @@ static void maxPreviewWavFile(const char* prefpath) {
   s_notify_slot = TOUCH_SND_MSG;
   s_notify_vol  = (int)touchPrefsGetSoundVolume();
   s_notify_playing = true;
-  if (xTaskCreate(maxNotifyTaskFn, "notify", 8192, nullptr, 3, nullptr) != pdPASS)
-    s_notify_playing = false;
+  if (!maxNotifyKick()) s_notify_playing = false;
 }
 #endif  // HAS_TDECK_MAX
 
