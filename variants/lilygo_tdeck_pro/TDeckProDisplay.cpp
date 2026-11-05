@@ -91,6 +91,9 @@ void TDeckProDisplay::turnOn() {
 }
 
 void TDeckProDisplay::turnOff() {
+#if defined(HAS_TDECK_MAX)
+  finishUpdate(true);   // let a running update end before the panel's power goes
+#endif
   writeBrightness(0);
   _epd.powerOff();
   _sleeping = true;
@@ -218,17 +221,97 @@ void TDeckProDisplay::writeBrightness(uint8_t brightness) {
 }
 
 void TDeckProDisplay::requestRefresh(bool full) {
+#if defined(HAS_TDECK_MAX)
+  const uint32_t now = millis();
+  if (!_refresh_pending) _first_request_ms = now;
+  _last_request_ms = now;
+#endif
   _refresh_pending = true;
   _full_refresh_pending = _full_refresh_pending || full;
 }
 
+#if defined(HAS_TDECK_MAX)
+// The Max sends a frame and lets the panel update on its own: the loop (radio,
+// touch, keyboard, LVGL) keeps running for the ~0.65 s the panel takes, and the
+// next frame goes out as soon as it is done. The SPI traffic (the frame, a few
+// commands) stays in this task, so nothing else on the shared bus can collide
+// with it; only the wait for BUSY is spread over the loop.
+//
+// A change is held back until LVGL has been quiet for 120 ms (at most 350 ms
+// after the first change), so a tap's pressed look and what the tap opens reach
+// the panel as one update rather than two.
+void TDeckProDisplay::finishUpdate(bool wait) {
+  if (!_epd_busy) return;
+  if (wait) {
+    const uint32_t t0 = millis();
+    while (_epd.epd2.refreshBusy() && millis() - t0 < 3000) busyCallback(nullptr);
+  } else if (_epd.epd2.refreshBusy() && millis() - _epd_start_ms < 3000) {
+    return;
+  }
+  digitalWrite(P_LORA_NSS, HIGH);
+  digitalWrite(PIN_SD_CS, HIGH);
+  _epd.epd2.finishRefresh(_epd_busy_full);
+  // The controller diffs against its "previous" RAM: make that the frame now shown.
+  _epd.epd2.writeImageAgain(_sent, 0, 0, WIDTH, HEIGHT);
+  _epd.epd2.powerOff();
+  _epd_busy = false;
+  writeBrightness(_brightness);
+  _last_refresh_ms = millis();
+}
+
+void TDeckProDisplay::serviceRefresh(bool force) {
+  finishUpdate(force);
+  if (_epd_busy) return;                         // still updating; the frame waits
+  if (!_refresh_pending || _sleeping || !_mono) return;
+  const uint32_t now = millis();
+  if (!force) {
+    if (_last_refresh_ms && now - _last_refresh_ms < 60) return;
+    if (now - _last_request_ms < 120 && now - _first_request_ms < 350) return;
+  }
+
+  // An unchanged frame is never sent, also when the next one is due to be a full
+  // refresh: after nine partials every redraw that changed no pixel (a label set to
+  // the text it had) used to flash the whole panel for a second for nothing. The
+  // full refresh waits for the next real change.
+  const bool full = _full_refresh_pending || _partial_refreshes >= 9 || _epd.epd2.needsInitialFull();
+  if (!_full_refresh_pending && _sent_valid && memcmp(_mono, _sent, MONO_BYTES) == 0) {
+    _refresh_pending = false;
+    return;
+  }
+
+  digitalWrite(P_LORA_NSS, HIGH);
+  digitalWrite(PIN_SD_CS, HIGH);
+  digitalWrite(PIN_TFT_CS, HIGH);
+  memcpy(_sent, _mono, MONO_BYTES);
+  _sent_valid = true;
+  if (full) _epd.epd2.writeImageForFullRefresh(_sent, 0, 0, WIDTH, HEIGHT);
+  else      _epd.epd2.writeImage(_sent, 0, 0, WIDTH, HEIGHT);
+  _epd.epd2.startRefresh(full);
+  _epd_busy = true;
+  _epd_busy_full = full;
+  _epd_start_ms = millis();
+  _refresh_pending = false;
+  _full_refresh_pending = false;
+  _partial_refreshes = full ? 0 : (uint8_t)(_partial_refreshes + 1);
+  if (force) finishUpdate(true);
+}
+#else
 void TDeckProDisplay::serviceRefresh(bool force) {
   if (!_refresh_pending || _sleeping || !_mono) return;
   const uint32_t now = millis();
   if (!force && _last_refresh_ms && now - _last_refresh_ms < 250) return;
 
+#if defined(HAS_TDECK_MAX)
+  // An unchanged frame is never sent, also when the next one is due to be a full
+  // refresh: after nine partials every redraw that changed no pixel (a label set to
+  // the text it had) used to flash the whole panel for a second for nothing. The
+  // full refresh waits for the next real change.
+  const bool full = _full_refresh_pending || _partial_refreshes >= 9;
+  if (!_full_refresh_pending && _sent_valid && memcmp(_mono, _sent, MONO_BYTES) == 0) {
+#else
   const bool full = _full_refresh_pending || _partial_refreshes >= 9;
   if (!full && _sent_valid && memcmp(_mono, _sent, MONO_BYTES) == 0) {
+#endif
     _refresh_pending = false;
     return;
   }
@@ -252,6 +335,8 @@ void TDeckProDisplay::serviceRefresh(bool force) {
   _full_refresh_pending = false;
   _partial_refreshes = full ? 0 : (uint8_t)(_partial_refreshes + 1);
 }
+
+#endif
 
 void TDeckProDisplay::busyCallback(const void*) {
   if (_busy_hook) _busy_hook();
