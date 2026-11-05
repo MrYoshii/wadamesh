@@ -956,6 +956,13 @@ void setup() {
     if (radio_ok) Serial.println("[BOOT] radio came up after the power-cycle");
   }
 #endif
+#if defined(HAS_TDECK_MAX)
+  // The same last resort on the T-Deck Max, whose LoRa supply is XL9555 line 1.
+  if (!radio_ok && board.radioPowerCycle()) {
+    radio_ok = radio_init();
+    Serial.printf("[BOOT] radio %s after the power-cycle\n", radio_ok ? "came up" : "still missing");
+  }
+#endif
   if (!radio_ok) {
     // A dead or absent LoRa module used to halt behind the frozen boot logo,
     // with the only clue on serial (#244). Say it on the panel instead.

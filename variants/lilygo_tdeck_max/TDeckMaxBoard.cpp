@@ -73,6 +73,17 @@ bool TDeckMaxBoard::xlWrite(uint8_t line, bool high) {
   return true;
 }
 
+bool TDeckMaxBoard::radioPowerCycle() {
+  if (!expander_ready_) return false;
+  Serial.println("[BOOT] T-Deck Max: power-cycling the LoRa supply");
+  digitalWrite(P_LORA_NSS, HIGH);
+  if (!xlWrite(TDMAX_XL_LORA_EN, false)) return false;
+  delay(120);                       // let the rail drain
+  if (!xlWrite(TDMAX_XL_LORA_EN, true)) return false;
+  delay(250);                       // POR and crystal start-up before SPI
+  return true;
+}
+
 void TDeckMaxBoard::touchReset() {
   if (!expander_ready_) return;
   xlWrite(TDMAX_XL_TOUCH_RST, false);

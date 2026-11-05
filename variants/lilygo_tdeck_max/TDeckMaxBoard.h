@@ -91,6 +91,11 @@ public:
   void touchReset();
   void keyboardReset();
 
+  // The SX1262's supply off and on again (LoRa EN, line 1), for a radio that does
+  // not answer at boot: a clean power-on reset however this boot was reached.
+  // False when the expander is unavailable.
+  bool radioPowerCycle();
+
   // GPS rail, called by the Max location provider around the core provider's
   // begin()/stop() so GPS on/off in the UI powers the module on and off.
   void gpsPowerOn();
