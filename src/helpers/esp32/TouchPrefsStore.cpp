@@ -2558,6 +2558,8 @@ void touchPrefsSetVibratePattern(uint8_t kind, uint8_t p) {
   static const char* const k[3] = { "vib_pm", "vib_pd", "vib_pn" };
   if (kind <= 2) prefsPutUChar(k[kind], p);
 }
+#endif
+#if defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)   // the fuel-gauge boards' battery settings
 uint16_t touchPrefsGetChargeMa()        { if (!s_begun) touchPrefsBegin(); return s_prefs.getUShort("chg_ma", 704); }
 void     touchPrefsSetChargeMa(uint16_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUShort("chg_ma", v); }
 uint16_t touchPrefsGetChargeMv()        { if (!s_begun) touchPrefsBegin(); return s_prefs.getUShort("chg_mv", 4288); }
@@ -2576,6 +2578,8 @@ uint32_t touchPrefsGetBattDayMah()        { if (!s_begun) touchPrefsBegin(); ret
 void     touchPrefsSetBattDayMah(uint32_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUInt("bat_mah", v); }
 uint32_t touchPrefsGetBattUse()          { if (!s_begun) touchPrefsBegin(); return s_prefs.getUInt("bat_use", 0); }
 void     touchPrefsSetBattUse(uint32_t v) { if (!s_begun) touchPrefsBegin(); prefsPutUInt("bat_use", v); }
+#endif
+#if defined(TLORA_PAGER)
 bool touchPrefsGetFaceDownQuiet()       { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("face_down", 0) != 0; }
 void touchPrefsSetFaceDownQuiet(bool on) { if (!s_begun) touchPrefsBegin(); prefsPutUChar("face_down", on ? 1 : 0); }
 bool touchPrefsGetPickupWake()         { if (!s_begun) touchPrefsBegin(); return s_prefs.getUChar("pick_wake", 0) != 0; }
@@ -3046,7 +3050,10 @@ static int backupKeys(BkKey* out, int cap) {
     "glance_en", "msg_led", "dnd_en", "dnd_ss", "dnd_es", "kbd_bl",
 #if defined(TLORA_PAGER)
     "vib_in", "vib_str", "vib_pm", "vib_pd", "vib_pn",   // the Pager's vibration settings ("vibrate" is above)
-    "chg_care", "low_batt", "face_down", "pick_wake",             // the Pager's battery care and quiet modes
+    "face_down", "pick_wake",                                     // the Pager's quiet modes
+#endif
+#if defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)
+    "chg_care", "low_batt",                                       // battery care and the low-battery guard
 #endif
     "chat_icons", "col_more", "col_style", "col_rb", "bg_kind", "gps_save", "gps_every",
     "glass", "bg_dim", "lock_dim",   // NOT "ant_ext": a restore must never point a unit at an empty antenna socket

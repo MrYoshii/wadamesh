@@ -19262,7 +19262,7 @@ static void buildGeneralPage() {
 }
 
 // ---- Settings > Battery ------------------------------------------------------------
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
 // ---- Settings > Battery > Charging (Pager) ----------------------------------------
 // The charge current, the charge voltage and the temperature guard. The defaults
 // are the safe ones (LilyGoLib's figures for this 1500 mAh pack, 0-45 deg C); any
@@ -19311,7 +19311,7 @@ static void chargeChoiceCb(lv_event_t* e) {
     warn = TR("Charge to 4.35 V?\nOnly for high-voltage (LiHV) cells. It overcharges a normal LiPo, which can "
               "then swell, fail or catch fire.");
   else if (kind == 2 && k_chg_tmax[i] == 0)
-    warn = TR("Switch the temperature guard off?\nThe Pager then charges a hot or frozen battery. Charging below "
+    warn = TR("Switch the temperature guard off?\nThe " BATT_DEV_NAME " then charges a hot or frozen battery. Charging below "
               "0 \xC2\xB0" "C damages the cell inside and can cause a short later; charging it hot risks swelling and fire.");
   else if (kind == 2 && k_chg_tmax[i] > 45)
     warn = TR("Charge up to this temperature?\nAbove 45 \xC2\xB0" "C a LiPo wears out fast while charging, and "
@@ -19344,8 +19344,13 @@ static void buildCareCard() {
   setSwitchRow(c, "Charge only to 80%", "Stops charging at 80%, starts again below 75%. Kept off a full charge, the pack "
                "lasts noticeably longer; turn it off before a long day away from power.",
                touchPrefsGetChargeCare(), chargeCareToggleCb);
+#if defined(TLORA_PAGER)
   setSwitchRow(c, "Low battery warning", "Warns with a vibration at 20%, again at 10%, and switches the Pager off "
                "at 3%, so the battery is never run flat.", touchPrefsGetLowBattWarn(), lowBattToggleCb);
+#else
+  setSwitchRow(c, "Low battery warning", "Warns at 20%, again at 10%, and switches the " BATT_DEV_NAME " off "
+               "at 3%, so the battery is never run flat.", touchPrefsGetLowBattWarn(), lowBattToggleCb);
+#endif
 }
 // The fitted pack's capacity. The steps only change the figure shown; "Apply"
 // writes it to the fuel gauge (config-update mode, about a second), after a confirm.
@@ -19432,7 +19437,7 @@ static void buildBatteryPage() {
                  false,
 #endif
                  sleepIdleToggleCb);
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
     // The percentage is the fuel gauge's own state of charge, not a voltage curve:
     // nothing to calibrate (and "hold to reset" has no key equivalent here).
     setNote(c, "The percentage comes from the battery's fuel gauge, which learns the pack by itself.");
@@ -25041,7 +25046,7 @@ static uint16_t batteryMvSampled() { return g_lv.task ? g_lv.task->getBattMilliV
 // The threshold against an uncalibrated ADC still wants on-device confirmation,
 // exactly as the V4-R8 note above already says.
 static bool batteryIsCharging(uint16_t mv) {
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   // The Pager's BQ25896 charger knows whether USB power is in, and its gauge reads
   // the CELL voltage, which never rises past the charger's target: the voltage test
   // below could not report charging on this board at all. Fall back to it only
@@ -25070,7 +25075,7 @@ static uint16_t batteryMvSmoothed() {
   // Normally hold for 20 s to kill jitter — BUT publish at once when the charge
   // state flips, so plugging/unplugging the charger is recognized immediately
   // instead of waiting out the hold window.
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   // The verdict above is the charger's, not a function of the reading, so comparing
   // two readings never sees it change: watch the charger's own state instead.
   static int s_ext_prev = -2;
@@ -25111,7 +25116,7 @@ static const char* batteryGlyphForMv(uint16_t mv) {
 }
 
 static int batteryPercentFromMv(uint16_t mv) {
-#if defined(HAS_TDISPLAY_P4) || defined(TLORA_PAGER)
+#if defined(HAS_TDISPLAY_P4) || CAP_BATT_GAUGE
   // This board has a BQ27220 fuel gauge, which coulomb-counts against its learned
   // pack profile and therefore knows the actual state of charge. Ask it, and only
   // fall back to the voltage curve below if it does not answer. Terminal voltage is
@@ -25286,7 +25291,7 @@ static void batteryLogTrim(fs::FS& fs, uint32_t epoch) {
 // The Pager adds a sixth, <mA>: the gauge's average battery current over the
 // period, + charging / - drawing (other readers stop at the fifth column).
 static void batteryLogAppend(uint32_t epoch, uint16_t mv, int pct, uint16_t cpu_mhz
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
                              , bool has_ma = false, int ma = 0
 #endif
                              ) {
@@ -25297,7 +25302,7 @@ static void batteryLogAppend(uint32_t epoch, uint16_t mv, int pct, uint16_t cpu_
   if (epoch > 1700000000 && localtime_r(&t, &tmv)) strftime(when, sizeof when, "%Y-%m-%d %H:%M", &tmv);
   File af = fs.open(battLogPath(), FILE_APPEND);
   if (!af) { if (battLogOnSd()) sdNoteIoFailure(); return; }
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   if (has_ma)
     af.printf("%lu\t%s\t%u\t%d\t%u\t%d\n", (unsigned long)epoch, when, (unsigned)mv, pct, (unsigned)cpu_mhz, ma);
   else
@@ -25311,7 +25316,7 @@ static void batteryLogAppend(uint32_t epoch, uint16_t mv, int pct, uint16_t cpu_
 // Called every UITask::loop tick; rate-limited to k_batt_log_period_ms. No new
 // timer: the UI loop already runs continuously on this always-on device. The
 // first sample waits half a minute, clear of the boot's own work.
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
 // ---- What the pack gave, per day (Pager) ----------------------------------------
 // The gauge's current, integrated over the 10 s samples below: mAh drawn from the
 // battery today (local midnight to now) and over the whole of yesterday. Charging
@@ -25371,7 +25376,7 @@ static void battDayTick(int16_t current_ma, uint32_t dt_ms) {
     s_bday_today += (float)(-current_ma) * (float)dt_ms / 3600000.0f;
 }
 #endif
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
 // ---- Time left at your usage (Pager) ---------------------------------------------
 // The gauge's own time-to-empty divides by its average current of the last
 // minute or so: 6 h with the screen on, 30 h with it off, jumping whenever the
@@ -25424,7 +25429,7 @@ static uint16_t battUseMinutesLeft(uint16_t remaining_mah) {
 #endif
 static void batteryLogTick(uint32_t now_ms) {
   static uint32_t s_next_ms = 0;
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   // The gauge's current, sampled every 10 s and averaged over the log period, so
   // a point shows what the period really drew, not whatever the screen was doing
   // at the instant of logging.
@@ -25434,7 +25439,7 @@ static void batteryLogTick(uint32_t now_ms) {
   if (!s_ma_ms || now_ms - s_ma_ms >= 10000u) {
     const uint32_t dt = s_ma_ms ? now_ms - s_ma_ms : 0;
     s_ma_ms = now_ms ? now_ms : 1;
-    const TLoraPagerBoard::GaugeInfo g = board.getGaugeInfo();
+    const auto g = board.getGaugeInfo();
     if (g.valid) { s_ma_sum += g.current_ma; ++s_ma_n; battDayTick(g.current_ma, dt); battUseTick(g.current_ma, dt); }
   }
 #endif
@@ -25443,7 +25448,7 @@ static void batteryLogTick(uint32_t now_ms) {
   s_next_ms = (now_ms ? now_ms : 1) + k_batt_log_period_ms;
   const uint16_t mv = batteryMvSmoothed();
   if (mv == 0) return;                               // no battery reading yet
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   const bool has_ma = s_ma_n > 0;
   const int ma = has_ma ? (int)(s_ma_sum / (int32_t)s_ma_n) : 0;
   s_ma_sum = 0; s_ma_n = 0;
@@ -25458,7 +25463,7 @@ static void batteryLogTick(uint32_t now_ms) {
   hwBattPush((uint32_t)time(nullptr), mv);   // the Battery widget's last 24 h
 }
 
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
 // The Pager's fuel gauge, live in the battery popup: what the pack is delivering
 // right now, what it holds, and how long that lasts at the present draw.
 static lv_obj_t*   s_bg_now  = nullptr;   // "-42 mA · 152 mW"
@@ -25473,7 +25478,7 @@ static void fmtMinutes(char* out, size_t cap, uint16_t mins) {
 }
 static void batteryGaugeRefresh() {
   if (!s_bg_now || !lv_obj_is_valid(s_bg_now)) return;
-  const TLoraPagerBoard::GaugeInfo g = board.getGaugeInfo();
+  const auto g = board.getGaugeInfo();
   char a[64], b[96], c[80], t[24];
   if (!g.valid) {
     lv_label_set_text(s_bg_now, TR("Fuel gauge not answering"));
@@ -25541,6 +25546,11 @@ static int batteryGaugeBlock(lv_obj_t* card, int y, lv_coord_t w) {
     lv_obj_set_style_text_font(l, f, LV_PART_MAIN);
     lv_obj_set_style_text_color(l, lv_color_hex(col), LV_PART_MAIN);
     lv_obj_set_width(l, w);
+#if defined(HAS_TDECK_MAX)
+    // One line each, cut with "..." on the narrow portrait panel: without a fixed
+    // height a long line wraps and runs into the next one.
+    lv_obj_set_height(l, lv_font_get_line_height(f));
+#endif
     lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
     lv_label_set_text(l, "");
     lv_obj_set_pos(l, 0, yy);
@@ -25551,12 +25561,18 @@ static int batteryGaugeBlock(lv_obj_t* card, int y, lv_coord_t w) {
   s_bg_misc = mk(&g_font_12, COLOR_SUB, y + lh14 + lh12);
   s_bg_day  = mk(&g_font_12, COLOR_SUB, y + lh14 + 2 * lh12);
   batteryGaugeRefresh();
+#if defined(HAS_TDECK_PRO)
+  // E-paper: every changed figure is a panel refresh that holds the UI for most
+  // of a second, so the live lines follow the gauge at a calmer pace.
+  s_bg_timer = lv_timer_create(batteryGaugeTimerCb, 10000, nullptr);
+#else
   s_bg_timer = lv_timer_create(batteryGaugeTimerCb, 2000, nullptr);   // the gauge refreshes every 2 s
+#endif
   return lh14 + 3 * lh12 + 4;
 }
 #endif
 static void batteryChartClose() {
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   batteryGaugeStop();
 #endif
   if (s_batt_chart_root) { popupClose(&s_batt_chart_root); }
@@ -25577,7 +25593,7 @@ static void batteryClearCb(lv_event_t* e) {
   if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
   showConfirm(TR("Clear battery history?"), TR("Clear"), batteryLogClearConfirmed);
 }
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
 // The Pager's right-hand series is the logged current draw unless the chip
 // switches it to CPU MHz (one secondary axis, so one or the other).
 static bool s_batt_show_cpu = false;
@@ -25587,7 +25603,7 @@ static bool s_batt_show_cpu = true;   // chart: draw the CPU-MHz series (session
 // Whether the chip by the trash button shows as on: everywhere it is the CPU
 // series' switch; on the Pager it picks the right axis and is always "on".
 static inline bool battSecondaryOn() {
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   return true;
 #else
   return s_batt_show_cpu;
@@ -25682,7 +25698,7 @@ static void openBatteryChartWindow() {
   lv_obj_set_style_text_font(title, &g_font_14, LV_PART_MAIN);
   lv_obj_set_style_text_color(title, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
   lv_obj_set_pos(title, 0, 0);
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   // The live gauge first: what the device draws now is what this popup is opened for.
   const int gauge_y = (int)lv_font_get_line_height(&g_font_14) + 4;
   const int gauge_h = batteryGaugeBlock(card, gauge_y, cardw - 20 - 34);   // clear of the X
@@ -25700,7 +25716,7 @@ static void openBatteryChartWindow() {
   static uint16_t* mvs  = (uint16_t*)psAlloc(sizeof(uint16_t) * k_max_pts);
   static uint16_t* cpus = (uint16_t*)psAlloc(sizeof(uint16_t) * k_max_pts);
   static uint32_t* eps  = (uint32_t*)psAlloc(sizeof(uint32_t) * k_max_pts);
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   static int16_t*  mas  = (int16_t*)psAlloc(sizeof(int16_t) * k_max_pts);   // draw, mA (+ = drawing)
   static const int16_t k_ma_none = INT16_MIN;                               // line without the column
   const bool ma_ok = mas != nullptr;
@@ -25726,7 +25742,7 @@ static void openBatteryChartWindow() {
         eps[slot]  = (uint32_t)strtoul(ln, nullptr, 10);   // first column = epoch
         mvs[slot]  = (uint16_t)mv;
         cpus[slot] = (uint16_t)(t4 ? atoi(t4 + 1) : 0);
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
         if (ma_ok) {
           char* t5 = t4 ? strchr(t4 + 1, '\t') : nullptr;
           int d = t5 ? -atoi(t5 + 1) : 0;                   // logged + charging -> draw
@@ -25744,7 +25760,7 @@ static void openBatteryChartWindow() {
         std::rotate(eps, eps + head, eps + k_max_pts);
         std::rotate(mvs, mvs + head, mvs + k_max_pts);
         std::rotate(cpus, cpus + head, cpus + k_max_pts);
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
         if (ma_ok) std::rotate(mas, mas + head, mas + k_max_pts);
 #endif
       }
@@ -25759,7 +25775,7 @@ static void openBatteryChartWindow() {
         memmove(eps, eps + first, sizeof(uint32_t) * (size_t)(n - first));
         memmove(mvs, mvs + first, sizeof(uint16_t) * (size_t)(n - first));
         memmove(cpus, cpus + first, sizeof(uint16_t) * (size_t)(n - first));
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
         if (ma_ok) memmove(mas, mas + first, sizeof(int16_t) * (size_t)(n - first));
 #endif
         n -= first;
@@ -25772,7 +25788,7 @@ static void openBatteryChartWindow() {
     lv_label_set_text(empty, TR("No battery history yet.\n\nLogged every 5 minutes."));
     lv_obj_set_style_text_color(empty, lv_color_hex(COLOR_SUB), LV_PART_MAIN);
     lv_obj_set_style_text_font(empty, &g_font_12, LV_PART_MAIN);
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
     lv_obj_set_pos(empty, 0, top_y + 6);
 #else
     lv_obj_set_pos(empty, 0, 28);
@@ -25790,7 +25806,7 @@ static void openBatteryChartWindow() {
   // Rows step by the fonts' real line heights: the fixed 18 px assumed a 12 px
   // font, and on the boards that grow it (the Pager's 16-18 px text) every line
   // below the chart overlapped the next and the card cut them off.
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   const int lh12 = (int)lv_font_get_line_height(&g_font_12) + 3;
   const int lh14 = (int)lv_font_get_line_height(&g_font_14) + 4;
   const int chart_h = 84;   // the card is 184 px tall here: the chart leaves room for the figures
@@ -25798,7 +25814,7 @@ static void openBatteryChartWindow() {
   const int lh12 = 18, lh14 = 18;   // the fixed steps every other board was laid out with
   const int chart_h = 122;
 #endif
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   const int chart_x = 30, chart_rpad = 30, chart_y = top_y + 6;
 #else
   const int chart_x = 30, chart_rpad = 30, chart_y = LV_MAX(18, lh14);
@@ -25835,7 +25851,7 @@ static void openBatteryChartWindow() {
     lv_chart_set_axis_tick(chart, LV_CHART_AXIS_SECONDARY_Y, 4, 0, 4, 1, true, 40);
     cser = lv_chart_add_series(chart, lv_color_hex(0x4A5256), LV_CHART_AXIS_SECONDARY_Y); // grey CPU (RF-monitor noise-floor tone)
   }
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   // Current draw on the right axis (amber), from the logged gauge averages: what
   // the screen, Wi-Fi and the radio cost over the day. Below 0 = charging.
   lv_chart_series_t* aser = nullptr;
@@ -25868,7 +25884,7 @@ static void openBatteryChartWindow() {
     if (v < y_bot) v = y_bot;
     lv_chart_set_next_value(chart, vser, v);
     if (cser) lv_chart_set_next_value(chart, cser, cpus[i] > 0 ? (lv_coord_t)cpus[i] : LV_CHART_POINT_NONE);
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
     if (aser) lv_chart_set_next_value(chart, aser, mas[i] != k_ma_none ? (lv_coord_t)mas[i] : LV_CHART_POINT_NONE);
 #endif
   }
@@ -25893,7 +25909,7 @@ static void openBatteryChartWindow() {
   // estimate (accent headline)
   char est[44];
   batteryEstimateText(eps, mvs, n, (int)full_mv, est, sizeof est);
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   est[0] = '\0';   // the gauge's own time left is above; a trend guess beside it only contradicts it
 #endif
   lv_obj_t* el = lv_label_create(card);
@@ -25912,7 +25928,7 @@ static void openBatteryChartWindow() {
              (unsigned)(mvs[n-1] / 1000), (unsigned)((mvs[n-1] % 1000) / 10),
              (unsigned)(y_top / 1000), (unsigned)((y_top % 1000) / 100),
              (unsigned)getCpuFrequencyMhz());
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   else if (ma_any)
     snprintf(sub, sizeof sub, "now %u.%02u V   %s %d mA",
              (unsigned)(mvs[n-1] / 1000), (unsigned)((mvs[n-1] % 1000) / 10),
@@ -25960,7 +25976,7 @@ static void openBatteryChartWindow() {
                                      : themeRole(0x3A3D40, COLOR_CONTROL_DISABLED)), LV_PART_MAIN);
   lv_obj_add_event_cb(cpub, batteryCpuToggleCb, LV_EVENT_CLICKED, nullptr);
   lv_obj_t* cpul = lv_label_create(cpub);
-#if defined(TLORA_PAGER)
+#if CAP_BATT_GAUGE
   lv_label_set_text(cpul, s_batt_show_cpu ? "CPU" : "mA");   // what the right axis shows; tap swaps
 #else
   lv_label_set_text(cpul, "CPU");
@@ -50234,74 +50250,6 @@ static bool pagerSliderEditClick() {
 }
 
 #if defined(TLORA_PAGER)
-// ---- Low battery (Pager) --------------------------------------------------------
-// On battery only, with Settings > Battery > Low battery warning on (the default):
-// a warning with a vibration at 20 % and again at 10 %, and at 3 % the Pager
-// switches itself off (ship mode, see powerOffNow) before the cell is run flat; a
-// LiPo left empty for long can be damaged for good. The percentage is the fuel
-// gauge's. Each warning comes once per discharge: plugging in (or the pack coming
-// back 5 % above it) arms it again. A warning given while the screen is off is
-// shown when it next comes on.
-#if defined(PIN_USER_BTN) && !defined(HAS_WIO_TRACKER_L2) && !defined(HAS_TDISPLAY_P4) && !defined(HAS_SENSECAP_INDICATOR)
-static void powerOffNow();
-#define PAGER_HAS_POWER_OFF 1
-#endif
-static void pagerLowBatteryTick(uint32_t now) {
-  static uint32_t s_ms = 0;
-  static int      s_warned = 101;       // the lowest level already warned about this discharge
-  static uint8_t  s_low_reads = 0;      // consecutive readings at or under the switch-off level
-  static uint32_t s_off_at = 0;         // when the switch-off goes ahead, 0 = not counting down
-  static const char* s_pending = nullptr;   // a warning still to show once the screen is on
-  if (s_pending && g_lv.task && !g_lv.task->isScreenOff()) { g_lv.task->showAlert(s_pending, 5000); s_pending = nullptr; }
-  if (now < 20000 || now - s_ms < 2000) return;   // let the boot and the gauge settle first
-  s_ms = now;
-  if (!g_lv.task) return;
-  const int soc = board.getBattStateOfCharge();
-  const bool on_usb = board.externalPowerPresent() != 0;   // 1 = USB, -1 = charger silent: do nothing
-  if (on_usb || soc < 0 || soc > 100 || !touchPrefsGetLowBattWarn()) {
-    if (s_off_at) { s_off_at = 0; if (on_usb) g_lv.task->showAlert(TR("Charging: switch-off cancelled"), 2500); }
-    if (on_usb) s_warned = 101;
-    s_low_reads = 0;
-    return;
-  }
-  if (soc >= s_warned + 5) s_warned = 101;          // charged back up a fair way
-  const bool vib_ok = touchPrefsGetVibrate() && !dndActive();
-  if (soc <= 3) {
-    if (++s_low_reads < 3) return;                  // 3 readings in a row (6 s): not a glitch
-    if (!s_off_at) {
-      s_off_at = now + 10000;
-      pagerHapticsPattern(PAGER_VIB_LONG, 2);
-      if (g_lv.task->isManualLock()) g_lv.task->lockscreenReveal();
-      else                           g_lv.task->wakeScreen();
-      g_lv.task->showAlert(TR("Battery empty: switching off in 10 s to protect it. Plug in to cancel."), 9500);
-    } else if ((int32_t)(now - s_off_at) >= 0) {
-      s_off_at = 0;
-#if defined(PAGER_HAS_POWER_OFF)
-      powerOffNow();
-#endif
-    }
-    return;
-  }
-  s_low_reads = 0;
-  if (s_off_at) s_off_at = 0;
-  static char s_msg[96];
-  const char* msg = nullptr;
-  if (soc <= 10 && s_warned > 10) {
-    s_warned = 10;
-    snprintf(s_msg, sizeof s_msg, TR("Battery at %d%%: charge soon"), soc);
-    msg = s_msg;
-    if (vib_ok) pagerHapticsPattern(PAGER_VIB_THRICE, 2);
-  } else if (soc <= 20 && s_warned > 20) {
-    s_warned = 20;
-    snprintf(s_msg, sizeof s_msg, TR("Battery low: %d%%"), soc);
-    msg = s_msg;
-    if (vib_ok) pagerHapticsPattern(PAGER_VIB_TWICE, touchPrefsGetVibrateStrength());
-  }
-  if (!msg) return;
-  if (g_lv.task->isScreenOff()) s_pending = msg;
-  else                          g_lv.task->showAlert(msg, 5000);
-}
-
 // ---- Motion: face down = quiet, pick up = wake (Pager) ---------------------------
 // Both off by default (Settings > Sound > Do Not Disturb; Settings > Display > Screen).
 // Face down: lying face down for 3 s turns the screen off and keeps the Pager
@@ -50882,6 +50830,85 @@ static void updatePagerEncoder(unsigned long now) {
   s_was_held = held;
 }
 #endif
+
+#if CAP_BATT_GAUGE
+// ---- Low battery (Pager, T-Deck Max) -------------------------------------------
+// On battery only, with Settings > Battery > Low battery warning on (the default):
+// a warning with a vibration at 20 % and again at 10 %, and at 3 % the Pager
+// switches itself off (ship mode, see powerOffNow) before the cell is run flat; a
+// LiPo left empty for long can be damaged for good. The percentage is the fuel
+// gauge's. Each warning comes once per discharge: plugging in (or the pack coming
+// back 5 % above it) arms it again. A warning given while the screen is off is
+// shown when it next comes on.
+#if defined(PIN_USER_BTN) && !defined(HAS_WIO_TRACKER_L2) && !defined(HAS_TDISPLAY_P4) && !defined(HAS_SENSECAP_INDICATOR)
+static void powerOffNow();
+#define PAGER_HAS_POWER_OFF 1
+#endif
+static void pagerLowBatteryTick(uint32_t now) {
+  static uint32_t s_ms = 0;
+  static int      s_warned = 101;       // the lowest level already warned about this discharge
+  static uint8_t  s_low_reads = 0;      // consecutive readings at or under the switch-off level
+  static uint32_t s_off_at = 0;         // when the switch-off goes ahead, 0 = not counting down
+  static const char* s_pending = nullptr;   // a warning still to show once the screen is on
+  if (s_pending && g_lv.task && !g_lv.task->isScreenOff()) { g_lv.task->showAlert(s_pending, 5000); s_pending = nullptr; }
+  if (now < 20000 || now - s_ms < 2000) return;   // let the boot and the gauge settle first
+  s_ms = now;
+  if (!g_lv.task) return;
+  const int soc = board.getBattStateOfCharge();
+  const bool on_usb = board.externalPowerPresent() != 0;   // 1 = USB, -1 = charger silent: do nothing
+  if (on_usb || soc < 0 || soc > 100 || !touchPrefsGetLowBattWarn()) {
+    if (s_off_at) { s_off_at = 0; if (on_usb) g_lv.task->showAlert(TR("Charging: switch-off cancelled"), 2500); }
+    if (on_usb) s_warned = 101;
+    s_low_reads = 0;
+    return;
+  }
+  if (soc >= s_warned + 5) s_warned = 101;          // charged back up a fair way
+#if defined(TLORA_PAGER)
+  const bool vib_ok = touchPrefsGetVibrate() && !dndActive();
+#endif
+  if (soc <= 3) {
+    if (++s_low_reads < 3) return;                  // 3 readings in a row (6 s): not a glitch
+    if (!s_off_at) {
+      s_off_at = now + 10000;
+#if defined(TLORA_PAGER)
+      pagerHapticsPattern(PAGER_VIB_LONG, 2);
+#endif
+      if (g_lv.task->isManualLock()) g_lv.task->lockscreenReveal();
+      else                           g_lv.task->wakeScreen();
+      g_lv.task->showAlert(TR("Battery empty: switching off in 10 s to protect it. Plug in to cancel."), 9500);
+    } else if ((int32_t)(now - s_off_at) >= 0) {
+      s_off_at = 0;
+#if defined(PAGER_HAS_POWER_OFF)
+      powerOffNow();
+#endif
+    }
+    return;
+  }
+  s_low_reads = 0;
+  if (s_off_at) s_off_at = 0;
+  static char s_msg[96];
+  const char* msg = nullptr;
+  if (soc <= 10 && s_warned > 10) {
+    s_warned = 10;
+    snprintf(s_msg, sizeof s_msg, TR("Battery at %d%%: charge soon"), soc);
+    msg = s_msg;
+#if defined(TLORA_PAGER)
+    if (vib_ok) pagerHapticsPattern(PAGER_VIB_THRICE, 2);
+#endif
+  } else if (soc <= 20 && s_warned > 20) {
+    s_warned = 20;
+    snprintf(s_msg, sizeof s_msg, TR("Battery low: %d%%"), soc);
+    msg = s_msg;
+#if defined(TLORA_PAGER)
+    if (vib_ok) pagerHapticsPattern(PAGER_VIB_TWICE, touchPrefsGetVibrateStrength());
+#endif
+  }
+  if (!msg) return;
+  if (g_lv.task->isScreenOff()) s_pending = msg;
+  else                          g_lv.task->showAlert(msg, 5000);
+}
+
+#endif  // CAP_BATT_GAUGE (low battery)
 
 // Specific popups that float OVER the app drawer / a tab. Used to swallow swipe
 // gestures so they don't leak to the drawer or switch tabs underneath them.
@@ -51631,7 +51658,7 @@ static void pagerGaugeNote(char* out, size_t cap) {
     snprintf(out, cap, "%s", blk > 0 ? TR("Charging paused: too hot") : TR("Charging paused: too cold"));
     return;
   }
-  const TLoraPagerBoard::GaugeInfo g = board.getGaugeInfo();
+  const auto g = board.getGaugeInfo();
   if (!g.valid) return;
   if (board.chargeCareHold() && g.current_ma <= 0 && board.externalPowerPresent() == 1) {
     snprintf(out, cap, "%s", TR("Kept at 80% (battery care)"));
@@ -56568,6 +56595,11 @@ static void powerOffNow() {
     g_lv.task->showAlert(board.externalPowerPresent() == 0
                            ? TR("Powering off\xE2\x80\xA6 hold the power key to switch on")
                            : TR("Powering off\xE2\x80\xA6 press BOOT to wake"), 1500);
+#elif defined(HAS_TDECK_MAX)
+    // On battery the SY6970 opens its battery switch (see below); on USB it is deep sleep.
+    g_lv.task->showAlert(board.externalPowerPresent() == 0
+                           ? TR("Powering off\xE2\x80\xA6 hold the power key or plug in USB to switch on")
+                           : TR("Powering off\xE2\x80\xA6 press BOOT to wake"), 1500);
 #else
     g_lv.task->showAlert(TR("Powering off\xE2\x80\xA6 press BOOT to wake"), 1500);
 #endif
@@ -56614,6 +56646,14 @@ static void powerOffNow() {
   // it does not return. On USB, or if the charger does not take it, carry on into
   // the deep sleep below exactly as before.
   board.enterShipMode();
+#elif defined(HAS_TDECK_MAX)
+  // On battery: the SY6970's ship mode, the same real power-off as on the Pager.
+  // The radio sleeps and the panel is already painted; enterShipMode() refuses
+  // on USB and the deep sleep below follows as before.
+  if (board.externalPowerPresent() == 0) {
+    radio_driver.powerOff();
+    board.enterShipMode();
+  }
 #endif
 #if defined(HELTEC_LORA_V4_R8)
   // Park everything before sleeping — without this the SX1262 stayed in RX
@@ -64898,7 +64938,7 @@ static void hwBatteryUpdate(int i) {
 #if defined(TLORA_PAGER)
   // The fuel gauge measures the current: show what the Pager draws (or takes in)
   // right now instead of the voltage, which says little on a gauged pack.
-  const TLoraPagerBoard::GaugeInfo gi = board.getGaugeInfo();
+  const auto gi = board.getGaugeInfo();
   if (gi.valid) {
     const int ma = gi.current_ma < 0 ? -gi.current_ma : gi.current_ma;
     snprintf(v, sizeof v, gi.current_ma > 0 ? "+%d mA" : "%d mA", ma);
@@ -83442,6 +83482,22 @@ void UITask::loop() {
   if (_screen_off && s_keyhelp) pagerKeyHelpClose();
   pagerLowBatteryTick(now);
   pagerMotionTick(now);
+#elif CAP_BATT_GAUGE
+  {
+    // The same battery duties as the Pager's block above (T-Deck Max): the stored
+    // charging limits once, the temperature guard's notices, the low-battery guard.
+    static bool s_chg_applied = false;
+    if (!s_chg_applied) { s_chg_applied = true; chargeSettingsApply(); }
+    static int s_chg_blk = 0;
+    const int blk = board.chargeTempBlock();
+    if (blk != s_chg_blk) {
+      s_chg_blk = blk;
+      showAlert(blk > 0 ? TR("Charging paused: battery too hot")
+              : blk < 0 ? TR("Charging paused: battery too cold")
+                        : TR("Battery temperature OK, charging again"), 4000);
+    }
+  }
+  pagerLowBatteryTick(now);
 #endif
 #elif defined(HAS_M9_KEYBOARD)
   // Own the stall buckets for everything a keypress triggers. The "ui:input"

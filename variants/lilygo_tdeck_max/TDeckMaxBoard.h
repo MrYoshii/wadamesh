@@ -7,7 +7,8 @@
 // enables, resets and switches go through an XL9555 I/O expander on the shared
 // I2C bus instead of direct GPIOs, and battery reporting comes from the
 // BQ27220 fuel gauge (the Pro's BQ25896 charger at 0x6B is not fitted; the Max
-// carries an SY6970 at 0x6A). Line map, boot state and reset timings follow
+// carries an SY6970 at 0x6A, a register-compatible part that owns USB input,
+// charging and the battery switch). Line map, boot state and reset timings follow
 // the Meck firmware's working bring-up of this exact board.
 #pragma once
 
@@ -21,6 +22,7 @@
 #include <GaugeBQ27220.hpp>
 
 #define TDMAX_XL9555_ADDR 0x20
+#define TDMAX_SY6970_ADDR 0x6A   // charger / power path
 
 // XL9555 lines. 0-7 are port 0, 8-15 are port 1.
 #define TDMAX_XL_6609_EN     0   // HIGH: A7682E modem supply (SGM6609 boost)
@@ -51,8 +53,56 @@
 
 class TDeckMaxBoard : public ESP32Board {
 public:
+  // SY6970 REG0B CHRG_STAT, plus Unknown when the charger does not answer.
+  // Same values and meaning as TLoraPagerBoard::ChargeState (BQ25896).
+  enum class ChargeState : uint8_t { NotCharging = 0, PreCharge = 1, FastCharge = 2, Done = 3, Unknown = 0xFF };
+
   void begin();
-  uint16_t getBattMilliVolts();
+
+  // ---- Battery (BQ27220 gauge) -----------------------------------------------
+  // The same API as TLoraPagerBoard, so the UI's battery pages, charge settings
+  // and low-battery guard serve both boards. One gauge read is cached for 2 s:
+  // the status bar asks several times a second.
+  uint16_t getBattMilliVolts() { refreshGauge(); return batt_mv_; }
+  // The gauge's StateOfCharge(), %; -1 until it has answered with an in-range value.
+  int getBattStateOfCharge() { refreshGauge(); return batt_soc_; }
+  struct GaugeInfo {
+    bool     valid;
+    int16_t  current_ma;      // + charging, - drawing from the pack
+    int16_t  power_mw;        // average power, same sign
+    uint16_t remaining_mah;
+    uint16_t full_mah;
+    uint16_t to_empty_min;    // 0xFFFF = not discharging
+    uint16_t to_full_min;     // 0xFFFF = not charging
+    int16_t  temp_c10;        // pack temperature, 0.1 deg C
+    uint16_t cycles;
+    uint16_t health_pct;
+  };
+  GaugeInfo getGaugeInfo() { refreshGauge(); return gauge_info_; }
+  // The fitted pack's capacity (LilyGo fits 1500 mAh). Stored in NVS and written
+  // to the gauge as design and full-charge capacity; true when it reads it back.
+  bool     setBatteryCapacity(uint16_t mah);
+  uint16_t batteryCapacitySetting();
+  uint16_t batteryDesignCapacity() const { return gauge.getDesignCapacity(); }
+
+  // ---- SY6970 charger ----------------------------------------------------------
+  // External power present: 1 yes, 0 no, -1 charger not answering (cached 1 s).
+  int  externalPowerPresent();
+  ChargeState chargeState();
+  // Charging held off for the pack temperature: 1 too hot, -1 too cold, 0 allowed.
+  int  chargeTempBlock() const { return charge_temp_block_; }
+  // Battery care: stop charging at 80 %, resume below 75 %.
+  void setChargeCare(bool on);
+  bool chargeCareHold() const { return care_hold_; }
+  // Fast-charge current (64 mA steps) and charge voltage (16 mV steps), and the
+  // temperature guard's limits in 0.1 deg C (upper 0 = guard off).
+  void setChargeLimits(uint16_t ma, uint16_t mv);
+  void setChargeTempMax(int16_t c10);
+  void setChargeTempMin(int16_t c10);
+  // Real power-off: opens the charger's battery switch (BATFET_DIS). Only the
+  // power key or plugging in USB switches the board back on. Refused (false)
+  // while USB is connected; on success it does not return.
+  bool enterShipMode();
 
   void enterDeepSleep(uint32_t secs, int pin_wake_btn) {
     esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
@@ -110,7 +160,26 @@ public:
   GaugeBQ27220 gauge;
 
 private:
+  void refreshGauge();
+  void chargeThermalCheck(int16_t temp_c10);
+  void chargeCareCheck(int soc);
+  void chargeEnableApply();
+
   bool expander_ready_ = false;
+  bool charger_ready_ = false;
+  uint16_t batt_mv_ = TDMAX_BATT_MILLIVOLTS_FALLBACK;
+  int      batt_soc_ = -1;
+  GaugeInfo gauge_info_ = {};
+  uint32_t batt_ms_ = 0;             // when the gauge was last read, 0 = never
+  int8_t   ext_pwr_ = -1;            // externalPowerPresent() cache
+  uint8_t  sys_stat_ = 0;            // REG0B as last read
+  uint32_t chg_ms_ = 0;              // when the charger was last read, 0 = never
+  int8_t   charge_temp_block_ = 0;
+  int16_t  chg_tmax_c10_ = 450;
+  int16_t  chg_tmin_c10_ = 0;
+  bool     care_on_ = false;
+  bool     care_hold_ = false;
+  bool     chg_enabled_ = true;
   bool gps_on_ = false;
   SemaphoreHandle_t expander_mutex_ = nullptr;
 };

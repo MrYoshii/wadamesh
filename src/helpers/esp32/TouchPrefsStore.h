@@ -650,7 +650,9 @@ uint8_t touchPrefsGetVibrateStrength();       // 0 light, 1 medium, 2 strong (de
 void    touchPrefsSetVibrateStrength(uint8_t s);
 uint8_t touchPrefsGetVibratePattern(uint8_t kind);   // kind 0 message, 1 DM, 2 @mention -> PagerVibPattern
 void    touchPrefsSetVibratePattern(uint8_t kind, uint8_t pattern);
-// Pager charging (Settings > Battery > Charging). Deliberately not in the backup:
+#endif
+#if defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)
+// Charging (Settings > Battery > Charging; the Pager and the T-Deck Max). Deliberately not in the backup:
 // a restore must never bring back a limit someone else chose to take a risk with.
 uint16_t touchPrefsGetChargeMa();            // fast-charge current, mA (default 704)
 void     touchPrefsSetChargeMa(uint16_t ma);
@@ -670,6 +672,8 @@ uint32_t touchPrefsGetBattDayMah();          // mAh drawn: today in the low 16 b
 void     touchPrefsSetBattDayMah(uint32_t v); // (0xFFFF = not known). Not in the backup: it is this pack's.
 uint32_t touchPrefsGetBattUse();             // average draw on battery: 0.1 mA low 16 bits, minutes seen high
 void     touchPrefsSetBattUse(uint32_t v);
+#endif
+#if defined(TLORA_PAGER)
 bool     touchPrefsGetFaceDownQuiet();       // lying face down: screen off, no sound or vibration (default off)
 void     touchPrefsSetFaceDownQuiet(bool on);
 bool     touchPrefsGetPickupWake();          // lifting it off a table lights the screen (default off)

@@ -80,7 +80,7 @@ SensorLib (T-LoRa Pager XL9555/BQ27220/AW9364/DRV2605/BHI260AP drivers)
     as distributed with SensorLib, which wadamesh uploads to the Pager's sensor
     hub at first use.
 
-XPowersLib (T-LoRa Pager BQ25896 charger driver)
+XPowersLib (T-LoRa Pager BQ25896 and T-Deck Max SY6970 charger drivers)
     Copyright (c) Lewis He — MIT License — https://github.com/lewisxhe/XPowersLib
 
 ES8311 register sequence and clock-divider coefficients (T-LoRa Pager audio

@@ -556,6 +556,23 @@
   #define CAP_IMU 0
 #endif
 
+// BQ27220 fuel gauge + TI-style charger with the TLoraPagerBoard battery API
+// (getGaugeInfo, externalPowerPresent, charge limits/care/temperature guard,
+// enterShipMode): Settings > Battery's charge and pack cards, the gauge in the
+// battery popup and the low-battery guard. The Pager (BQ25896) and the T-Deck
+// Max (SY6970, variants/lilygo_tdeck_max/TDeckMaxBoard.*).
+#if defined(TLORA_PAGER) || defined(HAS_TDECK_MAX)
+  #define CAP_BATT_GAUGE 1
+#else
+  #define CAP_BATT_GAUGE 0
+#endif
+// The name the battery texts use for the device ("switches the Pager off").
+#if defined(HAS_TDECK_MAX)
+  #define BATT_DEV_NAME "T-Deck"
+#else
+  #define BATT_DEV_NAME "Pager"
+#endif
+
 // The constellation screensaver's optional note left of the battery
 // (CstStatus::batt_note). Only the Pager fills it, from its fuel gauge, so only
 // the Pager carries the label (the Tanmatsu has no flash to spare for an empty one).
