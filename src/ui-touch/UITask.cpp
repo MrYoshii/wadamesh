@@ -2154,6 +2154,13 @@ static bool maxAudioInstallRate(int rate) {
   return true;
 }
 static bool maxAudioInstall() { return maxAudioInstallRate(kI2sSampleRate); }
+// The Max's speaker path clips audibly above ~85% of the shared ES8311 volume range
+// (that is already +20 dB of digital gain), so the slider's 100% is mapped to there.
+static void maxSetVolume(int pct) {
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  s_max_codec.setVolumePercent((uint8_t)((pct * 85 + 50) / 100));
+}
 static void maxAudioUninstall() {
   s_max_codec.setMute(true);
   s_max_codec.suspend();
@@ -2406,7 +2413,7 @@ static bool maxPlayWavFile(const char* prefpath, int volPct) {
   const uint32_t maxBytes = rate * frameBytes * 6u;   // ~6 s cap, matches the pager path
   if (dlen > maxBytes) dlen = maxBytes;
   if (!maxAudioInstallRate((int)rate)) { f.close(); return false; }
-  s_max_codec.setVolumePercent((uint8_t)volPct);
+  maxSetVolume(volPct);
   s_max_codec.setMute(false);
   int16_t in[256], out[256];
   uint32_t remaining = dlen;
@@ -2441,7 +2448,7 @@ static void maxNotifyPlayOnce() {
   bool played = (s_notify_path[0] && maxPlayWavFile(s_notify_path, volPct));
   Serial.printf("[MAXAUDIO] wav %s, falling back to chime\n", played ? "played" : "skipped");
   if (!played && maxAudioInstall()) {
-    s_max_codec.setVolumePercent((uint8_t)volPct);
+    maxSetVolume(volPct);
     s_max_codec.setMute(false);
     if (s_notify_slot == TOUCH_SND_MEN) {        // @-mention: bright 3-note rising arpeggio
       maxPlayToneRaw(1318, 70);                  // E6
@@ -73367,7 +73374,7 @@ static bool luaAudioSinkBegin(uint32_t source_rate, LuaAudioSinkSession* sink,
     if (error) *error = "audio unavailable";
     return false;
   }
-  s_max_codec.setVolumePercent((uint8_t)volume);
+  maxSetVolume((int)volume);
   s_max_codec.setMute(false);
   sink->output_rate = source_rate;
 #elif defined(HAS_TDISPLAY_P4)
