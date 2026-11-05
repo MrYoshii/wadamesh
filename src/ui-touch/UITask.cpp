@@ -833,6 +833,23 @@ static void applyThemeMode(uint8_t mode) {
                                              : (s_theme_day ? 0x3C4852u : p.recv_bg);
   COLOR_CHAT_MENTION_BG = s_theme_high_contrast ? 0x003F7Fu
                                                 : (s_theme_day ? 0x1D5F8Au : p.mention_bg);
+#if EINK_V2
+  // One bit, so one ink: every text, line and coloured fill (a green Connect, a red
+  // Forget) is black, its writing white, and every surface plain paper. Day's greys
+  // and tints otherwise fall either side of the panel's cut by chance: a red
+  // button with dark-red text came out as a black bar with nothing on it.
+  for (uint32_t* c : { &COLOR_BG, &COLOR_PANEL, &COLOR_FIELD, &COLOR_CONTROL, &COLOR_CONTROL_DISABLED,
+                       &COLOR_CONTROL_PRESSED, &COLOR_RAISED, &COLOR_ACCENT_SURFACE, &COLOR_CHART_BG,
+                       &COLOR_MENTION_BG, &COLOR_SENT_BG, &COLOR_RECV_BG, &COLOR_SECONDARY_ACTION,
+                       &COLOR_ON_ACCENT, &COLOR_ON_STATUS_OK, &COLOR_ON_STATUS_DANGER, &COLOR_ON_STATUS_INFO })
+    *c = 0xFFFFFFu;
+  for (uint32_t* c : { &COLOR_TEXT, &COLOR_SUB, &COLOR_TERTIARY, &COLOR_BORDER, &COLOR_HAIR, &COLOR_ACCENT_BORDER,
+                       &COLOR_CHART_TICK, &COLOR_MENTION, &COLOR_GLOW,
+                       &COLOR_STATUS_OK, &COLOR_STATUS_OK_PRESSED, &COLOR_STATUS_WARN, &COLOR_STATUS_DANGER,
+                       &COLOR_STATUS_DANGER_PRESSED, &COLOR_STATUS_INFO,
+                       &COLOR_STATUS_OK_TEXT, &COLOR_STATUS_WARN_TEXT, &COLOR_STATUS_DANGER_TEXT })
+    *c = 0x000000u;
+#endif
 }
 
 static inline uint32_t themeRole(uint32_t night, uint32_t day) {
@@ -5241,6 +5258,7 @@ static void glyphDrawCb(lv_event_t* e) {
   rd.bg_opa = LV_OPA_COVER;
   rd.bg_color = lv_color_hex(COLOR_SECONDARY_ACTION);
   for (int c = 0; c < 9; ++c) {
+    if (EINK_V2) break;   // paper: only the lit dots, the faint grid is noise at one bit
     if (lit & (1u << c)) continue;
     const lv_point_t p = cellPt(c);
     const lv_area_t d = { (lv_coord_t)(p.x - r_off), (lv_coord_t)(p.y - r_off), (lv_coord_t)(p.x + r_off), (lv_coord_t)(p.y + r_off) };
@@ -8311,15 +8329,19 @@ static void navMaybeRebuild() {
 #if EINK_V2
 // A dimmed backdrop behind a popup (black at 40-70 %) comes out of the one-bit cut
 // as a solid black field: the "black screen" around every menu and sheet. On paper
-// a popup's own black outline sets it apart; the page behind it stays as it was.
+// it becomes plain white, and the popup's own black outline sets it apart.
 // Applied to whatever covers most of the screen on the top and system layers (and
 // one level inside them), before LVGL draws the frame.
 static void einkFlattenRec(lv_obj_t* o, int depth, lv_coord_t sw, lv_coord_t sh) {
   if (!o || lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) return;
   const lv_opa_t opa = lv_obj_get_style_bg_opa(o, LV_PART_MAIN);
   if (opa > LV_OPA_TRANSP && opa < LV_OPA_COVER &&
-      lv_obj_get_width(o) >= sw * 9 / 10 && lv_obj_get_height(o) >= sh / 2)
-    lv_obj_set_style_bg_opa(o, LV_OPA_TRANSP, LV_PART_MAIN);
+      lv_obj_get_width(o) >= sw * 9 / 10 && lv_obj_get_height(o) >= sh / 2) {
+    // Plain paper, not see-through: some of these are the panel itself (the control
+    // centre), and a page showing through around a popup read as broken outlines.
+    lv_obj_set_style_bg_color(o, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, LV_PART_MAIN);
+  }
   if (depth >= 1) return;
   const uint32_t n = lv_obj_get_child_cnt(o);
   for (uint32_t i = 0; i < n; ++i) einkFlattenRec(lv_obj_get_child(o, i), depth + 1, sw, sh);
@@ -15741,7 +15763,12 @@ static void setIconLabel(lv_obj_t* l, const char* icon) {
 static void setDisabledLook(lv_obj_t* b, uint32_t face) {
   lv_obj_set_style_bg_color(b, lv_color_hex(face), LV_PART_MAIN | LV_STATE_DISABLED);
   lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DISABLED);
+#if EINK_V2
+  // Dimmed to 40 % is broken grey on one bit: a thin outline says "off" instead.
+  lv_obj_set_style_border_width(b, 1, LV_PART_MAIN | LV_STATE_DISABLED);
+#else
   lv_obj_set_style_opa(b, LV_OPA_40, LV_PART_MAIN | LV_STATE_DISABLED);
+#endif
 }
 
 // A full-width action: an icon, the name, an optional value, and a chevron when it opens
@@ -26022,6 +26049,9 @@ static void openBatteryChartWindow() {
   lv_obj_set_style_text_font(sl, &g_font_12, LV_PART_MAIN);
   lv_obj_set_style_text_color(sl, lv_color_hex(COLOR_SUB), LV_PART_MAIN);
   lv_obj_set_width(sl, cardw - 20);          // full width — its row has no buttons, so "MHz" never wraps
+#if defined(HAS_TDECK_MAX)
+  lv_obj_set_height(sl, lh12);               // one line on the narrow panel, or it runs into the next
+#endif
   lv_label_set_long_mode(sl, LV_LABEL_LONG_DOT);
   lv_obj_set_pos(sl, 0, by);
   by += LV_MAX(18, lh12);
@@ -42034,8 +42064,22 @@ static void applyMapChrome(bool on) {
       // on the map separately by updateTabIndicator().)
       lv_obj_set_style_text_color(btns, lv_color_hex(!on ? COLOR_ACCENT : (loading || light_map_chrome) ? 0xFFFFFF : 0x000000),
                                   LV_PART_ITEMS | LV_STATE_CHECKED);
+#if EINK_V2
+      // Paper: the bars stay solid over the map, the tab bar keeps its black icons
+      // and the active tab its white icon on black (on-map colours made it black
+      // on black).
+      lv_obj_set_style_bg_opa(btns, LV_OPA_COVER, LV_PART_MAIN);
+      lv_obj_set_style_text_color(btns, lv_color_black(), LV_PART_ITEMS);
+      lv_obj_set_style_text_color(btns, lv_color_white(), LV_PART_ITEMS | LV_STATE_CHECKED);
+#endif
     }
   }
+#if EINK_V2
+  if (g_statusbar.root) {
+    lv_obj_set_style_bg_opa(g_statusbar.root, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(g_statusbar.root, LV_OPA_COVER, LV_PART_MAIN);
+  }
+#endif
 }
 
 static void makeMapTab(lv_obj_t* tab) {
@@ -52245,8 +52289,14 @@ static void lockscreenHide() {
   // left the bar black over the map after unlocking there.)
   if (g_statusbar.root) {
     const bool on_map = getActiveTab() == MAP_TAB_INDEX;
+#if EINK_V2
+    (void)on_map;   // paper: the bar is solid on every page (see applyMapChrome)
+    lv_obj_set_style_bg_opa(g_statusbar.root, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(g_statusbar.root, LV_OPA_COVER, LV_PART_MAIN);
+#else
     lv_obj_set_style_bg_opa(g_statusbar.root, (on_map || s_sb_fade_active) ? LV_OPA_TRANSP : LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(g_statusbar.root, on_map ? LV_OPA_TRANSP : (EINK_V2 ? LV_OPA_COVER : LV_OPA_30), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(g_statusbar.root, on_map ? LV_OPA_TRANSP : LV_OPA_30, LV_PART_MAIN);
+#endif
   }
 }
 
@@ -62483,7 +62533,12 @@ static void updateGlobalStatusBar() {
         lv_obj_get_coords(g_statusbar.clock, &ca);
         const lv_coord_t room = ca.x1 - lv_obj_get_x(g_statusbar.root) - 6 - SC(6);
         if (lv_txt_get_width(credit, strlen(credit), sbFixed(&g_font_12), 0, LV_TEXT_FLAG_NONE) > room)
+#if EINK_V2
+          // The chained face: plain lv_font_montserrat_12 has no copyright sign and drew a box.
+          sbFont(g_statusbar.left_label, sbFixed(&g_font_12), LV_PART_MAIN);
+#else
           sbFont(g_statusbar.left_label, &lv_font_montserrat_12, LV_PART_MAIN);
+#endif
       }
 #endif
       setLabelIfChanged(g_statusbar.left_label, credit);
@@ -62506,8 +62561,9 @@ static void updateGlobalStatusBar() {
                         (sb_w >= 600) ? (sb_w - SC(190)) : (sb_w >= 300) ? 100 : 66,   // #47a: narrower on the 240 px V4 bar
                         LV_SIZE_CONTENT);
 #if EINK_V2
-        // E-paper: cut with "...", no marquee (each step of it was a panel update).
+        // E-paper: one line cut with "...", no marquee (each step of it was a panel update).
         lv_label_set_long_mode(g_statusbar.left_label, LV_LABEL_LONG_DOT);
+        lv_obj_set_height(g_statusbar.left_label, lv_font_get_line_height(lv_obj_get_style_text_font(g_statusbar.left_label, LV_PART_MAIN)));
 #else
         lv_label_set_long_mode(g_statusbar.left_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
 #endif
@@ -62733,7 +62789,13 @@ static void updateGlobalStatusBar() {
   if (g_statusbar.clock) {
     // ...and on Home while a clock widget shows the time already (Settings > Display > Home).
     static bool s_clk_hidden = false;
+#if EINK_V2
+    // ...and on the Max's map, where the 240 px bar holds the OSM credit or the
+    // time, not both (they overlapped).
+    const bool hide = s_reader_bar_url || homeWidgetsOwnClock() || getActiveTab() == MAP_TAB_INDEX;
+#else
     const bool hide = s_reader_bar_url || homeWidgetsOwnClock();
+#endif
     if (hide != s_clk_hidden) {
       s_clk_hidden = hide;
       if (hide) lv_obj_add_flag(g_statusbar.clock, LV_OBJ_FLAG_HIDDEN);
@@ -68474,6 +68536,11 @@ static void applyAccent(uint32_t rgb) {
     COLOR_STATUS_OK_PRESSED = COLOR_ACCENT_PRESS;
     COLOR_ON_STATUS_OK      = COLOR_ON_GLOW;
   }
+#if EINK_V2
+  // One ink (see applyThemeMode): the accent, its glow and "go" are black, on white.
+  COLOR_ACCENT = COLOR_ACCENT_PRESS = COLOR_GLOW = COLOR_STATUS_OK = COLOR_STATUS_OK_PRESSED = 0x000000u;
+  COLOR_ON_GLOW = COLOR_ON_STATUS_OK = 0xFFFFFFu;
+#endif
   themeStylesInvalidate();
   // Applied UI-wide on the next build: the Theme picker saves then restarts, so
   // every widget adopts the colour at once. (A live re-style only ever caught
@@ -68618,6 +68685,11 @@ static void applyBootTheme() {
 // with the active palette, including stronger outlines and inverse knobs/checks
 // in HC. Reads COLOR_ACCENT after applyAccent has initialized it at boot.
 static void touchThemeApplyCb(lv_theme_t* /*th*/, lv_obj_t* obj) {
+#if EINK_V2
+  // The stock theme greys a disabled control through a colour filter, and grey
+  // text falls apart in the one-bit cut (half its strokes go): keep it black.
+  lv_obj_set_style_color_filter_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_DISABLED);
+#endif
 #if defined(HAS_TDECK_PRO)
   // E-paper: one bit per pixel, so black outlines on white, never tints.
   if (!s_theme_day && !s_theme_high_contrast) {
