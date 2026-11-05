@@ -232,6 +232,21 @@ void TDeckProDisplay::serviceRefresh(bool force) {
     _refresh_pending = false;
     return;
   }
+  // TEST BUILD ONLY: where the frame changed, and since when.
+  if (_sent_valid) {
+    int y0 = HEIGHT, y1 = -1, x0 = WIDTH, x1 = -1;
+    for (int y = 0; y < HEIGHT; ++y)
+      for (int b = 0; b < WIDTH / 8; ++b) {
+        const size_t i = (size_t)y * (WIDTH / 8) + b;
+        if (_mono[i] == _sent[i]) continue;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+        if (b * 8 < x0) x0 = b * 8; if (b * 8 + 7 > x1) x1 = b * 8 + 7;
+      }
+    static uint32_t s_prev = 0;
+    Serial.printf("[EPD] %s changed x%d-%d y%d-%d (+%lums)\n", full ? "full" : "part", x0, x1, y0, y1,
+                  (unsigned long)(now - s_prev));
+    s_prev = now;
+  }
 
   digitalWrite(P_LORA_NSS, HIGH);
   digitalWrite(PIN_SD_CS, HIGH);
