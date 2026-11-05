@@ -5732,6 +5732,13 @@ static void drawRemotePlaceholder(bool exit_armed = false) {
   display.setColor((ColorVal)0xFFFF);
   display.drawTextCentered(W / 2, H - 104, "or tap Exit in the browser");
 #else
+  // The 1-bit e-paper thresholds every colour; green/orange/yellow land on black and
+  // vanish against the dark backdrop, hiding the address and the exit hint.
+#if defined(HAS_TDECK_MAX)
+  #define RPH_INK(c) ((ColorVal)0xFFFF)
+#else
+  #define RPH_INK(c) ((ColorVal)(c))
+#endif
   // wadamesh mesh mark up top (same white-on-black artwork as the boot splash). The
   // touch DisplayDriver runs at scale 1.0, so writePixelsRGB565 shares text coords.
   const int ly = (H >= 288) ? 46 : 14;   // portrait panels have room to breathe; landscape sits high
@@ -5739,7 +5746,7 @@ static void drawRemotePlaceholder(bool exit_armed = false) {
                             WADAMESH_MARK_W, WADAMESH_MARK_H, WADAMESH_MARK_RGB565);
   int y = ly + WADAMESH_MARK_H + 18;
   // Prominent title (the logo already carries the brand — no redundant "wadamesh" line).
-  display.setColor((ColorVal)0xFFFF);
+  display.setColor(RPH_INK(0xFFFF));
   display.setTextSize(2);
   display.drawTextCentered(W / 2, y, "REMOTE MODE");
   y += 34;
@@ -5747,12 +5754,12 @@ static void drawRemotePlaceholder(bool exit_armed = false) {
   if (up) {
     char u[48];
     snprintf(u, sizeof u, "http://%s:" WEB_UI_PORT_STR, WiFi.localIP().toString().c_str());
-    display.setColor((ColorVal)0xFFFF);
+    display.setColor(RPH_INK(0xFFFF));
     display.drawTextCentered(W / 2, y, "Open this address in a browser");
-    display.setColor((ColorVal)0x07E0);
+    display.setColor(RPH_INK(0x07E0));
     display.drawTextCentered(W / 2, y + 20, u);
   } else {
-    display.setColor((ColorVal)0xFD20);
+    display.setColor(RPH_INK(0xFD20));
     display.drawTextCentered(W / 2, y, "Connecting to Wi-Fi...");
   }
   // Footer: how to leave remote mode — the physical method, plus the browser fallback.
@@ -5763,13 +5770,14 @@ static void drawRemotePlaceholder(bool exit_armed = false) {
 #else
   const char* how = "Tap Exit in the browser to leave";
 #endif
-  display.setColor(exit_armed ? (ColorVal)0x07E0 : (ColorVal)0xFFE0);
+  display.setColor(RPH_INK(exit_armed ? 0x07E0 : 0xFFE0));
   display.drawTextCentered(W / 2, H - 30, how);
 #if CAP_KEYBOARD || CAP_TOUCH
-  display.setColor((ColorVal)0xFFFF);
+  display.setColor(RPH_INK(0xFFFF));
   display.drawTextCentered(W / 2, H - 14, "or tap Exit in the browser");
 #endif
 #endif
+#undef RPH_INK
   display.endFrame();
   s_remote_ph_ip = up ? (uint32_t)WiFi.localIP() : 0;
 }
