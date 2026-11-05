@@ -1627,6 +1627,31 @@ static void initTouchFontFallbacks() {
       break;
   }
   g_font_tab = lv_font_montserrat_16;
+#elif defined(HAS_TDECK_MAX) && !(defined(DOC_CAPTURE) && (defined(DOC_VIRT_FONTSET) || defined(DOC_VIRT_FSCALE)))
+  // The Max's three text sizes, each sized so the 240 px portrait layouts still fit:
+  // Small one step down from the established faces (12/12/14), Medium the
+  // established ones (12/14/16, the default: the stored 1), Large one step up
+  // (14/16/18). The Pro's 16/18/20 and 18/20/24 steps cut rows and menus off on
+  // this panel; a Huge size that does not fit is no size to offer.
+  s_ui_fscale = 100;
+  switch (touchPrefsGetUiScale()) {
+    case 0:
+      g_font_12 = lv_font_montserrat_12;
+      g_font_14 = lv_font_montserrat_12;
+      g_font_16 = lv_font_montserrat_14;
+      break;
+    case 2:
+      g_font_12 = lv_font_montserrat_14;
+      g_font_14 = lv_font_montserrat_16;
+      g_font_16 = lv_font_montserrat_18;
+      break;
+    default:
+      g_font_12 = lv_font_montserrat_12;
+      g_font_14 = lv_font_montserrat_14;
+      g_font_16 = lv_font_montserrat_16;
+      break;
+  }
+  g_font_tab = lv_font_montserrat_16;
 #elif (defined(HELTEC_LORA_V4_R8) || defined(HAS_THINKNODE_M9) || defined(HAS_TDECK_GT911) || defined(HAS_TDECK_PRO)) && \
       !(defined(DOC_CAPTURE) && (defined(DOC_VIRT_FONTSET) || defined(DOC_VIRT_FSCALE)))
   // Accessible semantic text without scaling 240x320 geometry. Rows, cards and
@@ -18712,6 +18737,8 @@ static void buildDisplayPage() {
 #if CAP_UI_SIZE
 #if defined(TLORA_PAGER)
     const char* sizes[] = { TR("Small"), TR("Medium"), TR("Large"), TR("Jumbo") };
+#elif defined(HAS_TDECK_MAX)
+    const char* sizes[] = { TR("Small"), TR("Medium"), TR("Large") };
 #elif defined(HELTEC_LORA_V4_R8) || defined(HAS_THINKNODE_M9) || defined(HAS_TDECK_GT911) || defined(HAS_TDECK_PRO)
     const char* sizes[] = { TR("Normal"), TR("Large text"), TR("Huge text") };
 #else
@@ -43099,7 +43126,11 @@ static int append_settings_section(lv_obj_t* tab, int y, const char* title, lv_e
   lv_obj_align(tit, LV_ALIGN_TOP_LEFT, 14, 8);
 
   lv_obj_t* sub = lv_label_create(row);
+#if EINK_V2
+  lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);   // e-paper: a marquee is a panel update every step
+#else
   lv_label_set_long_mode(sub, LV_LABEL_LONG_SCROLL_CIRCULAR);
+#endif
   lv_obj_set_width(sub, row_w - 48);
   lv_obj_set_height(sub, 18);
   lv_obj_set_style_text_font(sub, &g_font_12, LV_PART_MAIN);
@@ -60137,6 +60168,11 @@ static void addAppTile(lv_obj_t* parent, int x, int y, int w, int h,
     lv_obj_set_style_bg_color(dot, lv_color_hex(COLOR_STATUS_WARN), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_align(dot, LV_ALIGN_TOP_RIGHT, -SC(4), SC(4));
+#if EINK_V2
+    // E-paper: a steady dot. The breathing crossed the one-bit cut every 0.9 s,
+    // a panel update each time for as long as the app drawer was open.
+    lv_obj_set_style_bg_color(dot, lv_color_black(), LV_PART_MAIN);
+#else
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, dot);
@@ -60147,6 +60183,7 @@ static void addAppTile(lv_obj_t* parent, int x, int y, int w, int h,
     lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
     lv_anim_start(&a);
+#endif
   }
 }
 
@@ -62404,7 +62441,12 @@ static void updateGlobalStatusBar() {
 #if defined(HAS_TDECK_PRO)
     // Only at Normal text size. The bar itself keeps its Normal faces at every size
     // (sbFixed), but above Normal the name is left off it.
-    const bool home_name = tab == HOME_TAB_INDEX && !touchPrefsGetHideNodeName() && touchPrefsGetUiScale() == 0;
+    const bool home_name = tab == HOME_TAB_INDEX && !touchPrefsGetHideNodeName() &&
+#if defined(HAS_TDECK_MAX)
+                           touchPrefsGetUiScale() <= 1;   // Small and Medium: the Max's established faces
+#else
+                           touchPrefsGetUiScale() == 0;
+#endif
 #else
     const bool home_name = tab == HOME_TAB_INDEX && !touchPrefsGetHideNodeName();
 #endif
@@ -62463,7 +62505,12 @@ static void updateGlobalStatusBar() {
         lv_obj_set_size(g_statusbar.left_label,
                         (sb_w >= 600) ? (sb_w - SC(190)) : (sb_w >= 300) ? 100 : 66,   // #47a: narrower on the 240 px V4 bar
                         LV_SIZE_CONTENT);
+#if EINK_V2
+        // E-paper: cut with "...", no marquee (each step of it was a panel update).
+        lv_label_set_long_mode(g_statusbar.left_label, LV_LABEL_LONG_DOT);
+#else
         lv_label_set_long_mode(g_statusbar.left_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+#endif
         lv_obj_set_style_anim_speed(g_statusbar.left_label, 14, LV_PART_MAIN);  // slow, readable marquee
         setLabelIfChanged(g_statusbar.left_label, nm);
       }
