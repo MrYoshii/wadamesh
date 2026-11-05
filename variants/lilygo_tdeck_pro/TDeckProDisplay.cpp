@@ -273,7 +273,10 @@ void TDeckProDisplay::serviceRefresh(bool force) {
   // refresh: after nine partials every redraw that changed no pixel (a label set to
   // the text it had) used to flash the whole panel for a second for nothing. The
   // full refresh waits for the next real change.
-  const bool full = _full_refresh_pending || _partial_refreshes >= 9 || _epd.epd2.needsInitialFull();
+  // A full refresh (the black-white flash that clears any ghosting) after 29
+  // partials rather than 9: the Max's panel showed no ghosting at that pace, and
+  // the flash every few taps read as the screen going black.
+  const bool full = _full_refresh_pending || _partial_refreshes >= 29 || _epd.epd2.needsInitialFull();
   if (!_full_refresh_pending && _sent_valid && memcmp(_mono, _sent, MONO_BYTES) == 0) {
     _refresh_pending = false;
     return;
