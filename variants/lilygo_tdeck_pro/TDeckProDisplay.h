@@ -44,6 +44,11 @@ public:
 #endif
   bool getTouchPoint(uint16_t& x, uint16_t& y);
   void serviceRefresh(bool force = false);
+#if defined(HAS_TDECK_MAX)
+  // While the screen is off: one partial update of what LVGL drew (the lock screen's
+  // clock), front-light left off, then the panel back to sleep.
+  void refreshWhileAsleep();
+#endif
   void setBusyHook(BusyHook hook) { _busy_hook = hook; }
 
 private:

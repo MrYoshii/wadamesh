@@ -8346,6 +8346,7 @@ static void einkFlattenRec(lv_obj_t* o, int depth, lv_coord_t sw, lv_coord_t sh)
   const uint32_t n = lv_obj_get_child_cnt(o);
   for (uint32_t i = 0; i < n; ++i) einkFlattenRec(lv_obj_get_child(o, i), depth + 1, sw, sh);
 }
+static void einkLockClockTick();   // with the lock screen
 static void einkFlattenBackdrops() {
   const lv_coord_t sw = lv_disp_get_hor_res(nullptr), sh = lv_disp_get_ver_res(nullptr);
   for (lv_obj_t* layer : { lv_layer_top(), lv_layer_sys() }) {
@@ -52326,6 +52327,27 @@ static void serviceLockscreen() {
 #endif
   }
 }
+#if EINK_V2
+// The lock screen stays on the e-paper while the screen is off, so its clock has to
+// keep time there: once a minute, with the panel asleep and the front-light off,
+// redraw it and give the panel one partial update, then let it sleep again.
+static void einkLockClockTick() {
+  if (!g_lv.task || !g_lv.ready || !g_lv.task->isScreenOff() || !g_lv.task->isManualLock() || !s_lock_root) return;
+  mesh::RTCClock* rtc = the_mesh.getRTCClock();
+  const uint32_t t = rtc ? rtc->getCurrentTime() : 0;
+  const bool current = wallClockIsCurrent() && t > ClockFloorRTC::MIN_VALID_EPOCH;
+  int mm;
+  if (current) { time_t tt = (time_t)t; struct tm v; localtime_r(&tt, &v); mm = v.tm_min; }
+  else         mm = (int)((millis() / 60000u) % 60u);
+  if (mm == s_lock_clock_min && (current ? 1 : 0) == s_lock_clock_current) return;
+  s_lock_unread_ms = 0;          // unread count and battery along with the minute
+  serviceLockscreen();
+  lv_refr_now(nullptr);
+  display.refreshWhileAsleep();
+}
+#endif
+#elif EINK_V2
+static void einkLockClockTick() {}
 #endif  // CAP_LOCK_SCREEN
 
 // ---- Taste the rainbow: the hue drift ------------------------------------------------
@@ -84110,6 +84132,7 @@ void UITask::loop() {
 #endif
 #if EINK_V2
   einkFlattenBackdrops();
+  einkLockClockTick();
 #endif
   uiCp("ui:lvgl");
 #if defined(TLORA_PAGER)

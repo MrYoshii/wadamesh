@@ -97,6 +97,19 @@ void TDeckProDisplay::turnOff() {
   _is_on = false;
 }
 
+#if defined(HAS_TDECK_MAX)
+void TDeckProDisplay::refreshWhileAsleep() {
+  if (!_sleeping) { serviceRefresh(true); return; }
+  const uint8_t light = _brightness;
+  _brightness = 0;                       // every update re-applies it: keep the light off
+  _sleeping = false;
+  serviceRefresh(true);
+  _epd.powerOff();
+  _sleeping = true;
+  _brightness = light;
+}
+#endif
+
 void TDeckProDisplay::clear() {
   _canvas.fillScreen(0xFFFF);
   memset(_mono, 0xFF, MONO_BYTES);
