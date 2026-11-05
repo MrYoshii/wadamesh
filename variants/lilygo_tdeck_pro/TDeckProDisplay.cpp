@@ -129,7 +129,13 @@ bool TDeckProDisplay::isDark(uint16_t color) {
   const uint16_t red = (uint16_t)(((color >> 11) & 0x1F) * 255u / 31u);
   const uint16_t green = (uint16_t)(((color >> 5) & 0x3F) * 255u / 63u);
   const uint16_t blue = (uint16_t)((color & 0x1F) * 255u / 31u);
+#if defined(HAS_TDECK_MAX)
+  // A little more of each anti-aliased glyph edge counts as ink: the Max's e-paper
+  // look sets its text a shade heavier, which reads better on the one-bit panel.
+  return ((red * 54u + green * 183u + blue * 19u) >> 8) < 176u;
+#else
   return ((red * 54u + green * 183u + blue * 19u) >> 8) < 144u;
+#endif
 }
 
 void TDeckProDisplay::prepareMapTileRGB565(uint16_t* pixels, int width, int height) {

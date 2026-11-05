@@ -556,6 +556,17 @@
   #define CAP_IMU 0
 #endif
 
+// The T-Deck Max's e-paper look (black and white only, built for a one-bit panel):
+// the page's main action, a picked choice and your own messages in solid black
+// with white text, a rule under the status bar, the active tab inverted, drag
+// scrolling instead of page keys, a steady text cursor. The T-Deck Pro shares the
+// panel and could take it as well; for now it is the Max's.
+#if defined(HAS_TDECK_MAX)
+  #define EINK_V2 1
+#else
+  #define EINK_V2 0
+#endif
+
 // The constellation screensaver's optional note left of the battery
 // (CstStatus::batt_note). Only the Pager fills it, from its fuel gauge, so only
 // the Pager carries the label (the Tanmatsu has no flash to spare for an empty one).

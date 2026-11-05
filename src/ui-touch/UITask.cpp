@@ -5482,14 +5482,20 @@ static void styleButton(lv_obj_t* obj) {
 // The e-paper panel draws the primary button as the plain one (stylePrimary skips the
 // glow fill there), so its ink stays the plain text, not COLOR_ON_GLOW: that is white
 // under the T-Deck Pro's black accent, and read as white on white (Export backup).
-#if defined(HAS_TDECK_PRO)
+#if defined(HAS_TDECK_PRO) && !EINK_V2
 static constexpr bool kPrimaryGlowFill = false;
 #else
 static constexpr bool kPrimaryGlowFill = true;
 #endif
 static void stylePrimary(lv_obj_t* obj) {
   styleButton(obj);
-#if !defined(HAS_TDECK_PRO)
+#if EINK_V2
+  // Solid black with white semibold text: the one filled thing on a page of outlines.
+  lv_obj_set_style_bg_color(obj, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(obj, lv_color_black(), LV_PART_MAIN | LV_STATE_PRESSED);
+  lv_obj_set_style_text_color(obj, lv_color_white(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(obj, &g_font_semi_14, LV_PART_MAIN);
+#elif !defined(HAS_TDECK_PRO)
   lv_obj_set_style_bg_color(obj, lv_color_hex(COLOR_GLOW), LV_PART_MAIN);
   lv_obj_set_style_bg_color(obj, lv_color_hex(COLOR_ACCENT_PRESS), LV_PART_MAIN | LV_STATE_PRESSED);
   lv_obj_set_style_text_color(obj, lv_color_hex(COLOR_ON_GLOW), LV_PART_MAIN);
@@ -5547,7 +5553,9 @@ static void setPrimaryFace(lv_obj_t* btn, bool primary) {
     lv_obj_set_style_bg_grad_dir(btn, LV_GRAD_DIR_NONE, LV_PART_MAIN);
     lv_obj_set_style_outline_width(btn, 0, LV_PART_MAIN);
   }
-#if !defined(HAS_TDECK_PRO)
+#if EINK_V2
+  setInkDeep(btn, primary ? 0xFFFFFFu : 0x000000u);
+#elif !defined(HAS_TDECK_PRO)
   setInkDeep(btn, primary ? COLOR_ON_GLOW : COLOR_TEXT);
 #endif
 }
@@ -13037,6 +13045,10 @@ static void tabBarLookDrawCb(lv_event_t* e) {
 // immersive map tab (transparent chrome, black icons over the tiles).
 static void updateTabIndicator() {
   if (!s_tab_indicator || !g_lv.tabview) return;
+#if EINK_V2
+  lv_obj_add_flag(s_tab_indicator, LV_OBJ_FLAG_HIDDEN);   // the active cell is inverted instead
+  return;
+#endif
   const int idx = getActiveTab();
   if (s_look_more) lv_obj_set_style_bg_color(s_tab_indicator, lv_color_hex(tabHue(idx)), LV_PART_MAIN);
   if (s_nav_rail) {
@@ -15580,6 +15592,19 @@ static void setSwitchEnable(lv_obj_t* sw, bool enabled) {
 // others on the plain control, dimmed when the choice does nothing right now.
 static void setTileStyle(lv_obj_t* b, bool on, bool enabled) {
   if (!b) return;
+#if EINK_V2
+  // The pick inverted: a ring two pixels heavier is hard to tell apart on paper.
+  lv_obj_set_style_bg_color(b, on ? lv_color_black() : lv_color_white(), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_color(b, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_border_width(b, 2, LV_PART_MAIN);
+  lv_obj_set_style_border_opa(b, LV_OPA_COVER, LV_PART_MAIN);
+  setInkDeep(b, on ? 0xFFFFFFu : 0x000000u);
+  // Dimming cannot show on a one-bit panel: a choice that does nothing goes dashed-thin.
+  if (!enabled) lv_obj_set_style_border_width(b, 1, LV_PART_MAIN);
+  lv_obj_set_style_opa(b, LV_OPA_COVER, LV_PART_MAIN);
+  return;
+#endif
   lv_obj_set_style_bg_color(b, lv_color_hex(on ? rgbMix(COLOR_CONTROL, COLOR_GLOW, 46) : COLOR_CONTROL), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_color(b, lv_color_hex(on ? COLOR_GLOW : COLOR_BORDER), LV_PART_MAIN);
@@ -25949,6 +25974,10 @@ static void openBatteryChartWindow() {
   lv_obj_t* clrl = lv_label_create(clr); lv_label_set_text(clrl, LV_SYMBOL_TRASH); lv_obj_center(clrl);
   if (s_theme_day) lv_obj_set_style_text_color(clrl, lv_color_hex(COLOR_ON_STATUS_DANGER), LV_PART_MAIN);
   useChainedFont(clrl);
+#if EINK_V2
+  styleButton(clr);   // an outlined key like the others: red fills to a black block on paper
+  lv_obj_set_style_text_color(clrl, lv_color_black(), LV_PART_MAIN);
+#endif
 
   // Show/hide the CPU-MHz series (same size/style as the trash button, to its left).
   lv_obj_t* cpub = lv_btn_create(card);
@@ -41899,7 +41928,7 @@ static void applyMapChrome(bool on) {
   // ---- Status bar (lv_layer_sys, floats above the map) ----
   if (g_statusbar.root) {
     lv_obj_set_style_bg_opa(g_statusbar.root, on ? LV_OPA_TRANSP : LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(g_statusbar.root, on ? LV_OPA_TRANSP : LV_OPA_30, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(g_statusbar.root, on ? LV_OPA_TRANSP : (EINK_V2 ? LV_OPA_COVER : LV_OPA_30), LV_PART_MAIN);
     // Night mode inverts the tiles to DARK, so the on-map chrome flips from black
     // (legible over light tiles) to off-white (legible over the dark inverted tiles).
     const lv_color_t fg     = lv_color_hex(!on ? COLOR_TEXT : (light_map_chrome ? 0xF0F0F0 : 0x000000));
@@ -47340,7 +47369,14 @@ static lv_coord_t chatVirtCreateBubble(LvChatPanel* p, int logical_i, int ring_i
   lv_obj_set_pos(bubble, m.outgoing ? row_w - bw : 0, 0);
   lv_obj_set_style_radius(bubble, 9, LV_PART_MAIN);
   lv_obj_set_style_bg_color(bubble, bubble_bg, LV_PART_MAIN);
-#if defined(HAS_TDECK_PRO)
+#if EINK_V2
+  // Yours solid black, theirs outlined: who said what reads at a glance in one bit.
+  lv_obj_set_style_bg_color(bubble, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(bubble, m.outgoing ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_border_color(bubble, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_border_width(bubble, 2, LV_PART_MAIN);
+  lv_obj_set_style_border_opa(bubble, LV_OPA_COVER, LV_PART_MAIN);
+#elif defined(HAS_TDECK_PRO)
   lv_obj_set_style_bg_opa(bubble, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_color(bubble, lv_color_black(), LV_PART_MAIN);
   lv_obj_set_style_border_width(bubble, 2, LV_PART_MAIN);
@@ -47379,7 +47415,9 @@ static lv_coord_t chatVirtCreateBubble(LvChatPanel* p, int logical_i, int ring_i
   lv_obj_t* tlbl = lv_label_create(bubble);
   lv_obj_set_style_text_font(tlbl, msg_font, LV_PART_MAIN);
   lv_obj_set_style_text_color(tlbl,
-#if defined(HAS_TDECK_PRO)
+#if EINK_V2
+                              m.outgoing ? lv_color_white() : lv_color_black(),
+#elif defined(HAS_TDECK_PRO)
                               lv_color_black(),
 #else
                               lv_color_hex(COLOR_CHAT_TEXT),
@@ -51741,9 +51779,11 @@ static void lockAnimCb(lv_timer_t*) {
 static void lockHintText(char* out, size_t cap) {
 #if defined(HAS_TANMATSU)
   const char* h = TR("press Volume Down to unlock");
+#elif defined(HAS_TDECK_MAX)
+  const char* h = TR("hold Backspace to unlock");
 #elif defined(HAS_TDECK_PRO)
-  // Pro/Max also define HAS_PAGER_KEYBOARD, but Backspace unlock is disabled
-  // for them: GPIO0 is the deliberate unlock control.
+  // The Pro also defines HAS_PAGER_KEYBOARD, but Backspace unlock is disabled
+  // there: GPIO0 is the deliberate unlock control.
   const char* h = TR("press the button to unlock");
 #elif defined(HAS_PAGER_KEYBOARD)
   const char* h = TR("hold Backspace to unlock");
@@ -52133,7 +52173,7 @@ static void lockscreenHide() {
   if (g_statusbar.root) {
     const bool on_map = getActiveTab() == MAP_TAB_INDEX;
     lv_obj_set_style_bg_opa(g_statusbar.root, (on_map || s_sb_fade_active) ? LV_OPA_TRANSP : LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(g_statusbar.root, on_map ? LV_OPA_TRANSP : LV_OPA_30, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(g_statusbar.root, on_map ? LV_OPA_TRANSP : (EINK_V2 ? LV_OPA_COVER : LV_OPA_30), LV_PART_MAIN);
   }
 }
 
@@ -60948,6 +60988,14 @@ static void buildGlobalStatusBar() {
   // No bottom border — the bar blends into the page below it (no hard separation
   // line under the regular OR double-height bar).
   lv_obj_set_style_border_width(g_statusbar.root, 0, LV_PART_MAIN);
+#if EINK_V2
+  // A ruled edge under the bar, the way a printed page sets its running head.
+  lv_obj_set_style_border_side(g_statusbar.root, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
+  lv_obj_set_style_border_width(g_statusbar.root, 2, LV_PART_MAIN);
+  lv_obj_set_style_border_color(g_statusbar.root, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_border_opa(g_statusbar.root, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_post(g_statusbar.root, true, LV_PART_MAIN);   // over the bar's own full-height children
+#endif
 
   // ---- Glass backdrop for the lower row of the double-height bar ----
   // LVGL 8.4 bg gradients can't vary opacity, so fake a vertical solid->translucent
@@ -68490,6 +68538,12 @@ static void touchThemeApplyCb(lv_theme_t* /*th*/, lv_obj_t* obj) {
     styleEpaperControlOutline(obj, LV_PART_MAIN);
     lv_obj_set_style_text_color(obj, lv_color_black(), LV_PART_TEXTAREA_PLACEHOLDER);
     lv_obj_set_style_bg_color(obj, lv_color_black(), LV_PART_CURSOR);
+#if EINK_V2
+    // A steady cursor: a blinking one is a panel update every half second for as
+    // long as a text field has focus (the device log showed exactly that).
+    lv_obj_set_style_anim_time(obj, 0, LV_PART_CURSOR);
+    lv_obj_set_style_anim_time(obj, 0, LV_PART_CURSOR | LV_STATE_FOCUSED);   // the stock theme sets it per state
+#endif
   } else if (lv_obj_check_type(obj, &lv_dropdown_class)) {
     lv_obj_set_style_bg_color(obj, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
@@ -71291,6 +71345,21 @@ static void buildUiTree() {
   lv_obj_set_style_text_color(tab_btns, lv_color_hex(COLOR_GLOW),
                                LV_PART_ITEMS | LV_STATE_CHECKED);
   lv_obj_set_style_text_font(tab_btns, &g_font_14, LV_PART_MAIN);
+#if EINK_V2
+  // Paper: a ruled bar, every icon in full black, the active one white on a black
+  // cell. No thin glow bar to look for.
+  lv_obj_set_style_border_side(tab_btns, LV_BORDER_SIDE_TOP, LV_PART_MAIN);
+  lv_obj_set_style_border_width(tab_btns, 2, LV_PART_MAIN);
+  lv_obj_set_style_border_color(tab_btns, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_border_opa(tab_btns, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_text_color(tab_btns, lv_color_black(), LV_PART_ITEMS);
+  lv_obj_set_style_text_color(tab_btns, lv_color_white(), LV_PART_ITEMS | LV_STATE_CHECKED);
+  lv_obj_set_style_bg_color(tab_btns, lv_color_black(), LV_PART_ITEMS | LV_STATE_CHECKED);
+  lv_obj_set_style_bg_opa(tab_btns, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_CHECKED);
+  lv_obj_set_style_radius(tab_btns, 6, LV_PART_ITEMS | LV_STATE_CHECKED);
+  lv_obj_set_style_pad_all(tab_btns, 3, LV_PART_MAIN);
+  lv_obj_set_style_pad_column(tab_btns, 3, LV_PART_MAIN);
+#endif
 #if CAP_ROUND_CORNERS
   if (s_nav_rail) {
     // Rail on a round panel: keep the bottom cell clear of the bottom corner's arc
@@ -78048,6 +78117,11 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
       g_lv.indev_drv.type    = LV_INDEV_TYPE_POINTER;
       g_lv.indev_drv.read_cb = lvglTouchRead;
       g_lv.indev_drv.disp    = lv_disp_get_default();
+#if EINK_V2
+      // A flicked list stops soon after the finger lifts: every frame of a long
+      // coast is one more panel update on e-paper.
+      g_lv.indev_drv.scroll_throw = 40;
+#endif
       if (!lv_indev_drv_register(&g_lv.indev_drv)) pushDiagLine("LVGL indev failed");
     }
 #endif
@@ -78150,7 +78224,9 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
     if (touchPrefsGetRxQueue()) radio_driver.rxQueueEnable(true);
 
     buildUiTree();
-  #if defined(HAS_TDECK_PRO)
+  #if defined(HAS_TDECK_PRO) && !EINK_V2
+    // (The Max scrolls by dragging: its refresh no longer stops the UI, so a drag
+    // follows the finger and the panel catches up; no page keys over the content.)
     buildEpaperScrollControls();
     lv_obj_update_layout(lv_scr_act());
     epaperScrollControlsSync(true);
@@ -83303,8 +83379,8 @@ void UITask::loop() {
   // Remote Mode keeps the placeholder lit and reserves all keys for its local
   // escape path, so normal lock/backlight state machines stay paused there.
   if (!s_remote_mode) {
-#if !defined(HAS_TDECK_PRO)
-    updatePagerBackspaceUnlockHold(now);
+#if !defined(HAS_TDECK_PRO) || defined(HAS_TDECK_MAX)
+    updatePagerBackspaceUnlockHold(now);   // the Max: holding Backspace unlocks too, beside BOOT
 #endif
     updatePagerKbBacklight(now);
   }
