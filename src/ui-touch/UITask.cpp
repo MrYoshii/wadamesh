@@ -50831,6 +50831,9 @@ static void updatePagerEncoder(unsigned long now) {
 }
 #endif
 
+#if defined(HAS_TDECK_MAX)
+static bool s_off_batt_empty = false;   // the Max's off screen then says "Battery empty"
+#endif
 #if CAP_BATT_GAUGE
 // ---- Low battery (Pager, T-Deck Max) -------------------------------------------
 // On battery only, with Settings > Battery > Low battery warning on (the default):
@@ -50879,6 +50882,9 @@ static void pagerLowBatteryTick(uint32_t now) {
     } else if ((int32_t)(now - s_off_at) >= 0) {
       s_off_at = 0;
 #if defined(PAGER_HAS_POWER_OFF)
+#if defined(HAS_TDECK_MAX)
+      s_off_batt_empty = true;
+#endif
       powerOffNow();
 #endif
     }
@@ -56556,6 +56562,122 @@ static void powerRebootCb(lv_event_t* e) {
 // finds the hardware switch — and that is what the T-Display P4 did: no wake
 // source armed at all, under a toast promising a trackball it does not have
 // (#310). Boards without the symbol get no Power-off row (see openPowerMenu).
+#if defined(HAS_TDECK_MAX)
+static void maxFrontlightOff();         // with the brightness helpers
+// What stays on the Max's e-paper once it is off: the panel keeps its last image
+// with no power at all, so this is the face of a switched-off T-Deck for as long as
+// it lies in a drawer. A black disc with the power (or empty battery) mark, what
+// happened, how to switch it back on, and the name and charge it went down with.
+static void maxOffScreenShow(bool on_usb) {
+  if (!g_lv.ready) return;
+  const lv_coord_t sw = lv_disp_get_hor_res(nullptr), sh = lv_disp_get_ver_res(nullptr);
+  lv_obj_t* scr = lv_obj_create(lv_layer_sys());
+  lv_obj_remove_style_all(scr);
+  lv_obj_set_size(scr, sw, sh);
+  lv_obj_set_style_bg_color(scr, lv_color_white(), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(scr, NAV_SKIP_FLAG);
+
+  const lv_coord_t disc = 84;
+  lv_obj_t* d = lv_obj_create(scr);
+  lv_obj_remove_style_all(d);
+  lv_obj_set_size(d, disc, disc);
+  lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(d, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(d, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_align(d, LV_ALIGN_TOP_MID, 0, 46);
+  // The mark drawn from plain shapes, at a size the 28 px glyphs do not reach: the
+  // power sign (a ring open at the top and its bar), or an empty battery.
+  auto box = [&](lv_obj_t* parent, lv_coord_t w, lv_coord_t h, lv_coord_t r, bool filled) {
+    lv_obj_t* o = lv_obj_create(parent);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_style_radius(o, r, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(o, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(o, filled ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_color(o, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_border_width(o, filled ? 0 : 5, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(o, LV_OPA_COVER, LV_PART_MAIN);
+    return o;
+  };
+  if (s_off_batt_empty) {
+    lv_obj_t* body = box(d, 44, 26, 5, false);
+    lv_obj_align(body, LV_ALIGN_CENTER, -3, 0);
+    lv_obj_t* tip = box(d, 5, 12, 2, true);
+    lv_obj_align_to(tip, body, LV_ALIGN_OUT_RIGHT_MID, 1, 0);
+  } else {
+    lv_obj_t* ring = lv_arc_create(d);
+    lv_obj_remove_style_all(ring);
+    lv_obj_set_size(ring, 44, 44);
+    lv_arc_set_bg_angles(ring, 300, 240);   // open at the top
+    lv_arc_set_angles(ring, 300, 240);
+    lv_obj_set_style_arc_width(ring, 5, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(ring, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(ring, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(ring, true, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(ring, 0, LV_PART_INDICATOR);
+    lv_obj_clear_flag(ring, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(ring, LV_ALIGN_CENTER, 0, 3);
+    lv_obj_t* bar = box(d, 5, 24, 3, true);
+    lv_obj_align(bar, LV_ALIGN_CENTER, 0, -12);
+  }
+
+  lv_obj_t* t = lv_label_create(scr);
+  lv_label_set_text(t, s_off_batt_empty ? TR("Battery empty") : TR("Switched off"));
+  lv_obj_set_style_text_font(t, &lv_font_montserrat_20, LV_PART_MAIN);
+  lv_obj_set_style_text_color(t, lv_color_black(), LV_PART_MAIN);
+  lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 46 + disc + 18);
+
+  lv_obj_t* n = lv_label_create(scr);
+  const char* nm = g_lv.task ? g_lv.task->getNodeNameCstr() : nullptr;
+  lv_label_set_text(n, nm && nm[0] ? nm : "WADAMESH");
+  lv_label_set_long_mode(n, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(n, sw - 40);
+  lv_obj_set_style_text_align(n, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_obj_set_style_text_font(n, &g_font_14, LV_PART_MAIN);
+  lv_obj_set_style_text_color(n, lv_color_black(), LV_PART_MAIN);
+  lv_obj_align_to(n, t, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
+
+  lv_obj_t* rule = lv_obj_create(scr);
+  lv_obj_remove_style_all(rule);
+  lv_obj_set_size(rule, 120, 2);
+  lv_obj_set_style_bg_color(rule, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_align_to(rule, n, LV_ALIGN_OUT_BOTTOM_MID, 0, 16);
+
+  // How it comes back: on battery the charger has opened its battery switch, and only
+  // its power key (or USB) closes it; on USB it is a deep sleep that BOOT ends.
+  lv_obj_t* h = lv_label_create(scr);
+  lv_label_set_long_mode(h, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(h, sw - 40);
+  lv_obj_set_style_text_align(h, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_obj_set_style_text_font(h, &g_font_14, LV_PART_MAIN);
+  lv_obj_set_style_text_color(h, lv_color_black(), LV_PART_MAIN);
+  lv_label_set_text(h, s_off_batt_empty ? TR("Plug in USB-C to charge, then press the power button.")
+                     : on_usb ? TR("Press BOOT to switch on.")
+                              : TR("Press the power button to switch on."));
+  lv_obj_align_to(h, rule, LV_ALIGN_OUT_BOTTOM_MID, 0, 16);
+
+  lv_obj_t* f = lv_label_create(scr);
+  char foot[48];
+  const int soc = board.getBattStateOfCharge();
+  if (soc >= 0) snprintf(foot, sizeof foot, "WADAMESH  \xC2\xB7  %d%%", soc);
+  else          snprintf(foot, sizeof foot, "WADAMESH");
+  lv_label_set_text(f, foot);
+  lv_obj_set_style_text_font(f, &g_font_semi_12, LV_PART_MAIN);
+  lv_obj_set_style_text_letter_space(f, 2, LV_PART_MAIN);
+  lv_obj_set_style_text_color(f, lv_color_black(), LV_PART_MAIN);
+  lv_obj_align(f, LV_ALIGN_BOTTOM_MID, 0, -14);
+
+  // One clean full refresh: no ghost of the page that was up a moment ago.
+  display.clear();
+  lv_obj_invalidate(lv_scr_act());
+  lv_obj_invalidate(scr);
+  lv_refr_now(nullptr);
+  display.serviceRefresh(true);
+}
+#endif
 #if defined(PIN_USER_BTN) && !defined(HAS_WIO_TRACKER_L2) && !defined(HAS_TDISPLAY_P4) && !defined(HAS_SENSECAP_INDICATOR)
 static void powerOffNow();
 static void powerOffCb(lv_event_t* e) {
@@ -56596,10 +56718,9 @@ static void powerOffNow() {
                            ? TR("Powering off\xE2\x80\xA6 hold the power key to switch on")
                            : TR("Powering off\xE2\x80\xA6 press BOOT to wake"), 1500);
 #elif defined(HAS_TDECK_MAX)
-    // On battery the SY6970 opens its battery switch (see below); on USB it is deep sleep.
-    g_lv.task->showAlert(board.externalPowerPresent() == 0
-                           ? TR("Powering off\xE2\x80\xA6 hold the power key or plug in USB to switch on")
-                           : TR("Powering off\xE2\x80\xA6 press BOOT to wake"), 1500);
+    // No toast: the off screen below says it, and stays on the panel.
+    maxFrontlightOff();
+    maxOffScreenShow(board.externalPowerPresent() != 0);
 #else
     g_lv.task->showAlert(TR("Powering off\xE2\x80\xA6 press BOOT to wake"), 1500);
 #endif
